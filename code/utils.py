@@ -14,14 +14,25 @@ def convert_examples_to_features(item):
     i = 0
     while inputl < args.max_input_length - 2 and i < prev_after_len:
         if i < len(prevlines):
+            newl = inputl + len(prevlines[-1-i]) + 1
+            if newl > args.max_input_length - 2:
+                break
             lines.insert(0, prevlines[-1-i])
             labels.insert(0, 2)
-            inputl += len(prevlines[-1-i])
+            inputl = newl  # tag
         if i < len(afterlines):
+            newl = inputl + len(afterlines[i]) + 1
+            if newl > args.max_input_length - 2:
+                break
             lines.append(afterlines[i])
             labels.append(2)
-            inputl += len(afterlines[i])
+            inputl = newl    # tag
         i += 1
+    assert inputl <= args.max_input_length - 2
+    source_ids = []
+    for i, line, label in enumerate(zip(lines, labels)):
+        
+    
 
 def cconvert_examples_to_features(item):
     example, example_index, tokenizer, args, stage = item

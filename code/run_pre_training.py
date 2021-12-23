@@ -7,7 +7,7 @@ import numpy as np
 from tqdm import tqdm
 import multiprocessing
 import time
-from utils import convert_examples_to_features
+from utils import convert_examples_to_features, read_review_examples
 import json
 from torch.utils.data import Dataset
 from itertools import cycle
@@ -31,17 +31,30 @@ logger = logging.getLogger(__name__)
 
 class TextDataset(Dataset):
     def __init__(self, tokenizer, pool, args, file_path=None):
-        self.examples = []
-        with open(file_path) as f:
-            for line in f:
-                line = line.strip()
-                self.examples.append(line)
+        self.examples = read_review_examples(file_path, 100)
 
     def __len__(self):
         return len(self.examples)
 
     def __getitem__(self, i):
         return self.examples[i]
+
+
+def get_loaders(data_list):
+    num_train_optimization_steps = 0
+    for data_file in data_list:
+        data_file = os.path.join(args.train_filename, data_file)
+        dataset = TextDataset(tokenizer, pool, args, data_file)
+        sampler = DistributedSampler(dataset)
+        dataloader = 
+            cycle(
+                DataLoader(
+                    dataset, sampler=sampler, batch_size=args.train_batch_size
+                )
+            )
+        num_train_optimization_steps += args.num_train_epochs * len(dataloader) * args.gradient_accumulation_steps
+        data_tuple.append((dataset, sampler, dataloader))
+    return data_tuple, num_train_optimization_steps
 
 
 def main(local_rank, args):
@@ -73,20 +86,7 @@ def main(local_rank, args):
     # data_list = ["data_{}.json".format(i) for i in range(5)]
     data_list = [os.path.join(args.train_path, f"{lang}_cls.jsonl" for lang in args.langs]
           + [os.path.join(args.train_path, f"{lang}_gen.jsonl" for lang in args.langs]
-    data_tuple = []
-    num_train_optimization_steps = 0
-    for data_file in data_list:
-        data_file = os.path.join(args.train_filename, data_file)
-        dataset = TextDataset(tokenizer, pool, args, data_file)
-        sampler = DistributedSampler(dataset)
-        dataloader = 
-            cycle(
-                DataLoader(
-                    dataset, sampler=sampler, batch_size=args.train_batch_size
-                )
-            )
-        num_train_optimization_steps += args.num_train_epochs * len(dataloader) * args.gradient_accumulation_steps
-        data_tuple.append((dataset, sampler, dataloader))
+    data_tuple, num_train_optimization_steps = get_loaders(data_list)
     args.num_train_optimization_steps = num_train_optimization_steps
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ["bias", "LayerNorm.weight"]
@@ -152,6 +152,7 @@ def main(local_rank, args):
             global_epoch += 1
             if global_epoch > args.num_train_epochs:
                 break
+            # data_tuple, __ = get_loaders(data_list)
             for _, _, dataloader in data_tuple:
                 dataloader.sampler.set_epoch(global_epoch)
         

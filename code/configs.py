@@ -18,41 +18,16 @@ def add_args(parser):
     )
     parser.add_argument(
         "--model_type",
-        default="t5",
+        default="codet5",
         type=str,
         choices=["roberta", "t5", "bart", "codet5"],
     )
     parser.add_argument("--add_lang_ids", action="store_true")
-    parser.add_argument("--data_num", default=-1, type=int)
+    parser.add_argument("--from_scratch", action="store_true")
     parser.add_argument("--start_epoch", default=0, type=int)
-    parser.add_argument("--num_train_epochs", default=10, type=int)
-    parser.add_argument("--patience", default=5, type=int)
+    parser.add_argument("--train_epochs", default=10, type=int)
     parser.add_argument("--tokenizer_path", type=str, required=False)
-    parser.add_argument("--cache_path", type=str, required=False)
-    parser.add_argument("--summary_dir", type=str, required=False)
-    parser.add_argument("--data_dir", type=str, required=False)
-    parser.add_argument("--res_dir", type=str, required=False)
-    parser.add_argument("--res_fn", type=str, default="")
-    parser.add_argument(
-        "--add_task_prefix",
-        action="store_true",
-        help="Whether to add task prefix for t5 and codet5",
-    )
-    parser.add_argument("--save_last_checkpoints", action="store_true")
-    parser.add_argument("--always_save_model", action="store_true")
-    parser.add_argument(
-        "--do_eval_bleu",
-        action="store_true",
-        help="Whether to evaluate bleu on dev set.",
-    )
-
-    ## Required parameters
-    parser.add_argument(
-        "--model_name_or_path",
-        default="t5-base",
-        type=str,
-        help="Path to pre-trained model: e.g. roberta-base",
-    )
+    
     parser.add_argument(
         "--output_dir",
         default=None,
@@ -64,6 +39,12 @@ def add_args(parser):
         "--load_model_path",
         default=None,
         type=str,
+        required=False
+    )
+    parser.add_argument(
+        "--model_name_or_path",
+        default=None,
+        type=str,
         help="Path to trained model: Should contain the .bin files",
     )
     ## Other parameters
@@ -72,6 +53,12 @@ def add_args(parser):
         default=None,
         type=str,
         help="The train files path. Should contain the .jsonl files for this task.",
+    )
+    parser.add_argument(
+        "--train_filename",
+        default=None,
+        type=str,
+        help="The train filename. Should contain the .jsonl files for this task.",
     )
     parser.add_argument(
         "--dev_filename",
@@ -85,18 +72,11 @@ def add_args(parser):
         type=str,
         help="The test filename. Should contain the .jsonl files for this task.",
     )
-
     parser.add_argument(
         "--config_name",
-        default="t5-base",
+        default="Salesforce/codet5-base",
         type=str,
         help="Pretrained config name or path if not the same as model_name",
-    )
-    parser.add_argument(
-        "--tokenizer_name",
-        default="roberta-base",
-        type=str,
-        help="Pretrained tokenizer name or path if not the same as model_name",
     )
     parser.add_argument(
         "--max_source_length",
@@ -174,12 +154,6 @@ def add_args(parser):
     parser.add_argument(
         "--log_steps", default=-1, type=int,
     )
-    parser.add_argument(
-        "--max_steps",
-        default=-1,
-        type=int,
-        help="If > 0: set total number of training steps to perform. Override num_train_epochs.",
-    )
     parser.add_argument("--eval_steps", default=-1, type=int, help="")
     parser.add_argument("--train_steps", default=-1, type=int, help="")
     parser.add_argument(
@@ -194,6 +168,7 @@ def add_args(parser):
     parser.add_argument(
         "--seed", type=int, default=2233, help="random seed for initialization"
     )  # previous one 42
+
     args = parser.parse_args()
     return args
 

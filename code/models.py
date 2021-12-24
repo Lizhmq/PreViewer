@@ -19,13 +19,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-MODEL_CLASSES = {
-    "roberta": (RobertaConfig, RobertaModel, RobertaTokenizer),
-    "t5": (T5Config, T5ForConditionalGeneration, RobertaTokenizer),
-    "codet5": (T5Config, T5ForConditionalGeneration, RobertaTokenizer),
-    "bart": (BartConfig, BartForConditionalGeneration, BartTokenizer),
-}
-
 
 class ReviewerModel(T5ForConditionalGeneration):
 
@@ -125,8 +118,12 @@ class ReviewerModel(T5ForConditionalGeneration):
             return loss
         return cls_logits, lm_logits
 
-MODEL_CLASSES["t5"] = (T5Config, ReviewerModel, RobertaTokenizer)
-
+MODEL_CLASSES = {
+    "roberta": (RobertaConfig, RobertaModel, RobertaTokenizer),
+    "t5": (T5Config, T5ForConditionalGeneration, RobertaTokenizer),
+    "codet5": (T5Config, ReviewerModel, RobertaTokenizer),
+    "bart": (BartConfig, BartForConditionalGeneration, BartTokenizer),
+}
 
 def load_t5(
     config,
@@ -272,7 +269,7 @@ def get_model_size(model):
 
 
 def build_or_load_gen_model(args):
-    assert args.model_type == "t5"  # only t5 supported now
+    assert args.model_type == "codet5"  # only t5 supported now
     config_class, model_class, tokenizer_class = MODEL_CLASSES[args.model_type]
     config = config_class.from_pretrained(
         args.config_name if args.config_name else args.model_name_or_path

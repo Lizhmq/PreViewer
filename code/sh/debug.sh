@@ -1,7 +1,8 @@
-work_dir="/mnt/lzzz/PreViewer"
+work_dir="/home/v-zhuoli1/wspace/PreViewer"
 
-CUDA_VISIBLE_DEVICES=0,1 \
-  python -m torch.distributed.launch --nproc_per_node 2 ../run_pre_training.py  \
+
+CUDA_VISIBLE_DEVICES=0 \
+  python ../run_pre_training.py \
     --model_type codet5 \
     --add_lang_ids \
     --train_epochs 10 \
@@ -9,7 +10,7 @@ CUDA_VISIBLE_DEVICES=0,1 \
     --tokenizer_path Salesforce/codet5-base \
     --model_name_or_path Salesforce/codet5-base \
     --output_dir ${work_dir}/saved_models \
-    --train_path ${work_dir}/../processed \
+    --train_path ${work_dir}/../../lzzz/processed \
     --max_source_length 512 \
     --max_target_length 256 \
     --train_batch_size 4 \

@@ -35,8 +35,8 @@ def get_loaders(data_list, args, tokenizer, pool):
     random.shuffle(data_list)       # this will shuffle data chunks
     for data_file in data_list:
         dataset = TextDataset(tokenizer, pool, args, data_file)
-        # sampler = DistributedSampler(dataset)
-        sampler = RandomSampler(dataset)
+        sampler = DistributedSampler(dataset)
+        # sampler = RandomSampler(dataset)
         dataloader = DataLoader(dataset, sampler=sampler, batch_size=args.train_batch_size, collate_fn=fn)
         dataloader = cycle(dataloader)
         yield dataset, sampler, dataloader
@@ -63,12 +63,19 @@ def save_model(model, optimizer, scheduler, output_dir, config):
 
 
 def main(local_rank, args):
+    LOCAL = os.environ["CUDA_VISIBLE_DEVICES"] == "0"
+    if LOCAL:
+        # means local here
+        os.environ["MASTER_IP"] = "*"
+        os.environ["MASTER_PORT"] = "22333"
+        os.environ["WORLD_SIZE"] = "1"
+        os.environ["RANK"] = "0"
+    gpus = torch.cuda.device_count()
+    args.n_gpu = gpus
     ip = os.environ["MASTER_IP"]
     port = os.environ["MASTER_PORT"]
     hosts = int(os.environ["WORLD_SIZE"])
     rank = int(os.environ["RANK"])
-    gpus = torch.cuda.device_count()
-    args.n_gpu = gpus
     dist.init_process_group(
         backend="nccl",
         init_method=f"tcp://{ip}:{port}",
@@ -88,7 +95,6 @@ def main(local_rank, args):
     model = DDP(model.cuda(), device_ids=[local_rank], output_device=local_rank)
     pool = multiprocessing.Pool(args.cpu_count)
 
-    # data_list = ["data_{}.json".format(i) for i in range(5)]
     data_list = [os.path.join(args.train_path, f"{lang}_gen.jsonl") for lang in args.langs]
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ["bias", "LayerNorm.weight"]
@@ -135,7 +141,7 @@ def main(local_rank, args):
         )
 
     global_step = 0
-    save_steps = 1000
+    save_steps = args.save_steps
 
     for epoch in range(1, args.train_epochs + 1):
         data_tuples = get_loaders(data_list, args, tokenizer, pool)        # WARNING: this is a iterator, to save memory
@@ -182,7 +188,7 @@ def main(local_rank, args):
                     optimizer.zero_grad()
                     scheduler.step()
                     global_step += 1
-                    if rank == 0 and local_rank == 0 and global_step % 100 == 0:
+                    if rank == 0 and local_rank == 0 and global_step % args.log_steps == 0:
                         train_loss = round(
                             tr_loss
                             * args.gradient_accumulation_steps
@@ -197,14 +203,14 @@ def main(local_rank, args):
                             )
                         )
                     if global_step == args.train_steps:
-                        output_dir = os.path.join(args.output_dir, "checkpoints")
+                        output_dir = os.path.join(args.output_dir, "checkpoints" + str(global_step))
                         save_model(model, optimizer, scheduler, output_dir, config)
-                        logger.info("Reach max steps {args.train_steps}.")
+                        logger.info(f"Reach max steps {args.train_steps}.")
                         time.sleep(5)
                         return
 
                 if rank == 0 and local_rank == 0 and global_step % save_steps == 0:
-                    output_dir = os.path.join(args.output_dir, "checkpoints")
+                    output_dir = os.path.join(args.output_dir, "checkpoints-" + str(global_step))
                     save_model(model, optimizer, scheduler, output_dir, config)
                     logger.info(
                         "Save the {}-step model and optimizer into {}".format(
@@ -223,19 +229,8 @@ def main(local_rank, args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     args = add_args(parser)
-    args.train_path = ''
-    args.langs = [""]
-    # args.model_type = "codet5"
-    # args.train_filename = "../data/pre-training/"
-    # args.num_train_epochs = 10
-    # args.learning_rate = 5e-5
-    # args.tokenizer_name = "roberta-base"
-    # args.tokenizer_path = "../tokenizer/salesforce"
-    # args.model_name_or_path = "../pretrained_models/codet5_base"
-    # args.output_dir = "../editing_models/editing_base"
-    # args.train_batch_size = 5
-    # args.max_source_length = 512
-    # args.max_target_length = 256
     args.cpu_count = multiprocessing.cpu_count()
+    args.langs = ["ruby"]
     logger.info(args)
+    # main(0, args)
     torch.multiprocessing.spawn(main, args=(args,), nprocs=torch.cuda.device_count())

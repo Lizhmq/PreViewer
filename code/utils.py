@@ -5,7 +5,7 @@ from torch.utils.data import Dataset
 
 class TextDataset(Dataset):
     def __init__(self, tokenizer, pool, args, file_path=None):
-        self.examples = read_review_examples(file_path, 1)
+        self.examples = read_review_examples(file_path, 100)
 
     def __len__(self):
         return len(self.examples)
@@ -32,6 +32,7 @@ def convert_examples_to_features(item):
         else:
             right -= 1
             inputl -= len(lines[right]) + 1
+    lines = lines[left:right]
     i = 0
     while inputl < args.max_source_length - 2 and i < prev_after_len:
         if i < len(prevlines):
@@ -69,7 +70,8 @@ def convert_examples_to_features(item):
     if example.msg != "":
         target_ids.append(tokenizer.msg_id)
         target_ids.extend(tokenizer.encode(example.msg)[1:-1])
-    assert len(input_labels) == len(source_ids)
+    assert len(input_labels) == len(source_ids), "Not equal length."
+    assert len(input_labels) <= args.max_source_length - 2, "Too long inputs."
     input_labels = [-100] + input_labels + [-100]
     source_ids = [tokenizer.bos_id] + source_ids + [tokenizer.eos_id]
     pad_len = args.max_source_length - len(source_ids)

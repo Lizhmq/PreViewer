@@ -25,7 +25,7 @@ def add_args(parser):
     parser.add_argument("--add_lang_ids", action="store_true")
     parser.add_argument("--data_num", default=-1, type=int)
     parser.add_argument("--start_epoch", default=0, type=int)
-    parser.add_argument("--num_train_epochs", default=100, type=int)
+    parser.add_argument("--num_train_epochs", default=10, type=int)
     parser.add_argument("--patience", default=5, type=int)
     parser.add_argument("--tokenizer_path", type=str, required=False)
     parser.add_argument("--cache_path", type=str, required=False)
@@ -68,10 +68,10 @@ def add_args(parser):
     )
     ## Other parameters
     parser.add_argument(
-        "--train_filename",
+        "--train_path",
         default=None,
         type=str,
-        help="The train filename. Should contain the .jsonl files for this task.",
+        help="The train files path. Should contain the .jsonl files for this task.",
     )
     parser.add_argument(
         "--dev_filename",
@@ -211,17 +211,17 @@ def set_dist(args):
         device = torch.device("cuda", args.local_rank)
         torch.distributed.init_process_group(backend="nccl")
         args.n_gpu = 1
-    cpu_cont = multiprocessing.cpu_count()
+    cpu_count = multiprocessing.cpu_count()
     logger.warning(
         "Process rank: %s, device: %s, n_gpu: %s, distributed training: %s, cpu count: %d",
         args.local_rank,
         device,
         args.n_gpu,
         bool(args.local_rank != -1),
-        cpu_cont,
+        cpu_count,
     )
     args.device = device
-    args.cpu_cont = cpu_cont
+    args.cpu_count = cpu_count
 
 
 def set_seed(args):

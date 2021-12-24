@@ -1,7 +1,7 @@
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
-from torch.nn import CrossEntropyLoss
+from torch.nn import CrossEntropyLoss, BCEWithLogitsLoss
 import numpy as np
 from transformers import (
     RobertaConfig,
@@ -21,10 +21,111 @@ logger = logging.getLogger(__name__)
 
 MODEL_CLASSES = {
     "roberta": (RobertaConfig, RobertaModel, RobertaTokenizer),
-    "t5": (T5Config, T5Model, RobertaTokenizer),
+    "t5": (T5Config, T5ForConditionalGeneration, RobertaTokenizer),
     "codet5": (T5Config, T5ForConditionalGeneration, RobertaTokenizer),
     "bart": (BartConfig, BartForConditionalGeneration, BartTokenizer),
 }
+
+
+class ReviewerModel(T5ForConditionalGeneration):
+
+    def __init__(self, config):
+        super().__init__(config)
+        self.cls_head = nn.Linear(config.d_model, 3, bias=True)
+        self.init()
+
+    @staticmethod
+    def from_pretrained(path):
+        model = T5ForConditionalGeneration.from_pretrained(path)
+        # model.lm_head = nn.Linear(model.config.d_model, model.config.vocab_size, bias=False)
+        model.__class__ = ReviewerModel
+        model.cls_head = nn.Linear(model.config.d_model, 3, bias=True)
+        model.init()
+        return model
+
+    def init(self):
+        # nn.init.xavier_uniform_(self.lm_head.weight)
+        factor = self.config.initializer_factor
+        # self.lm_head.weight.data.normal_(mean=0.0, \
+        #     std=factor * ((self.config.d_model) ** -0.5))
+        self.cls_head.weight.data.normal_(mean=0.0, \
+            std=factor * ((self.config.d_model) ** -0.5))
+        self.cls_head.bias.data.zero_()
+
+
+    def forward(
+        self, *argv, **kwargs
+    ):
+        if "input_labels" in kwargs:
+            input_ids = kwargs["input_ids"]
+            input_labels = kwargs["input_labels"]
+            decoder_input_ids = kwargs["decoder_input_ids"]
+            attention_mask = kwargs["attention_mask"]
+            decoder_attention_mask = kwargs["decoder_attention_mask"]
+            # self = argv[0]
+            return self.review_forward(input_ids, input_labels, decoder_input_ids, attention_mask, decoder_attention_mask)
+        return super().forward(*argv, **kwargs)
+
+    def review_forward(
+        self,
+        input_ids,
+        input_labels,
+        decoder_input_ids,
+        attention_mask,
+        decoder_attention_mask,
+    ):
+        r"""
+        labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size,)`, `optional`):
+            Labels for computing the sequence classification/regression loss. Indices should be in :obj:`[-100, 0, ...,
+            config.vocab_size - 1]`. All labels set to ``-100`` are ignored (masked), the loss is only computed for
+            labels in ``[0, ..., config.vocab_size]``
+        Returns:
+        Examples::
+            >>> from transformers import T5Tokenizer, T5ForConditionalGeneration
+            >>> tokenizer = T5Tokenizer.from_pretrained('t5-small')
+            >>> model = T5ForConditionalGeneration.from_pretrained('t5-small')
+            >>> # training
+            >>> input_ids = tokenizer('The <extra_id_0> walks in <extra_id_1> park', return_tensors='pt').input_ids
+            >>> labels = tokenizer('<extra_id_0> cute dog <extra_id_1> the <extra_id_2>', return_tensors='pt').input_ids
+            >>> outputs = model(input_ids=input_ids, labels=labels)
+            >>> loss = outputs.loss
+            >>> logits = outputs.logits
+            >>> # inference
+            >>> input_ids = tokenizer("summarize: studies have shown that owning a dog is good for you", return_tensors="pt").input_ids  # Batch size 1
+            >>> outputs = model.generate(input_ids)
+            >>> print(tokenizer.decode(outputs[0], skip_special_tokens=True))
+            >>> # studies have shown that owning a dog is good for you.
+        """
+        encoder_outputs = self.encoder( \
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            output_attentions=False,
+            return_dict=False
+        )
+        hidden_states = encoder_outputs[0]
+        decoder_input_ids = self._shift_right(decoder_input_ids)
+        # Decode
+        decoder_outputs = self.decoder(
+            input_ids=decoder_input_ids,
+            attention_mask=decoder_attention_mask,
+            encoder_hidden_states=hidden_states,
+            encoder_attention_mask=attention_mask,
+            output_attentions=False,
+            return_dict=False
+        )
+        sequence_output = decoder_outputs[0]
+        if self.config.tie_word_embeddings: # this is True default
+            sequence_output = sequence_output * (self.model_dim ** -0.5)
+        lm_logits = self.lm_head(sequence_output)
+        cls_logits = self.cls_head(hidden_states).squeeze()
+        if decoder_input_ids is not None and input_labels is not None:
+            loss_fct = CrossEntropyLoss(ignore_index=-100)
+            loss = loss_fct(lm_logits.view(-1, lm_logits.size(-1)), decoder_input_ids.view(-1))
+            loss += loss_fct(cls_logits.view(-1, cls_logits.size(-1)), input_labels.view(-1))
+            return loss
+        return cls_logits, lm_logits
+
+MODEL_CLASSES["t5"] = (T5Config, ReviewerModel, RobertaTokenizer)
 
 
 def load_t5(
@@ -38,8 +139,8 @@ def load_t5(
 ):
     if not tokenizer_path:
         tokenizer_path = "t5-base"
-    # tokenizer = tokenizer_class.from_pretrained(tokenizer_path)
-    tokenizer = tokenizer_class.from_pretrained("Salesforce/codet5-base")
+    tokenizer = tokenizer_class.from_pretrained(tokenizer_path)
+    # tokenizer = tokenizer_class.from_pretrained("Salesforce/codet5-base")
     
     # T5 has <pad> <s> </s> <unk> <mask>
     # tokenizer.add_special_tokens(
@@ -101,7 +202,7 @@ def load_t5(
     tokenizer.msg_id = tokenizer.get_vocab()["<msg>"]
 
     if from_scratch:
-        model = T5Model(config)
+        model = ReviewerModel(config)
 
     return config, model, tokenizer
 

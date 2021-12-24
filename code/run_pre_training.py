@@ -2,7 +2,7 @@ import os
 import torch
 import logging
 import argparse
-import math
+import random
 import numpy as np
 from tqdm import tqdm
 import multiprocessing
@@ -27,23 +27,39 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def get_loaders(args, tokenizer, pool):
+def get_loaders(data_list, args, tokenizer, pool):
     def fn(examples):
         feats = pool.map(convert_examples_to_features, [(example, tokenizer, args) for example in examples])
         # feats = [convert_examples_to_features((example, tokenizer, args)) for example in examples]
         return feats
-    num_train_optimization_steps = 0
-    data_tuples = []
-    data_list = [os.path.join(args.train_path, f"{lang}_gen.jsonl") for lang in args.langs]
+    random.shuffle(data_list)       # this will shuffle data chunks
     for data_file in data_list:
         dataset = TextDataset(tokenizer, pool, args, data_file)
         # sampler = DistributedSampler(dataset)
         sampler = RandomSampler(dataset)
         dataloader = DataLoader(dataset, sampler=sampler, batch_size=args.train_batch_size, collate_fn=fn)
-        num_train_optimization_steps += args.num_train_epochs * len(dataloader) * args.gradient_accumulation_steps
         dataloader = cycle(dataloader)
-        data_tuples.append((dataset, sampler, dataloader))
-    return data_tuples, num_train_optimization_steps
+        yield dataset, sampler, dataloader
+
+def save_model(model, optimizer, scheduler, output_dir, config):
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    model_to_save = model.module if hasattr(model, "module") else model
+    config.save_pretrained(output_dir)
+    output_model_file = os.path.join(output_dir, "pytorch_model.bin")
+    torch.save(model_to_save.state_dict(), output_model_file)
+    output_optimizer_file = os.path.join(output_dir, "optimizer.pt")
+    torch.save(
+        optimizer.state_dict(),
+        output_optimizer_file,
+        _use_new_zipfile_serialization=False,
+    )
+    output_scheduler_file = os.path.join(output_dir, "scheduler.pt")
+    torch.save(
+        scheduler.state_dict(),
+        output_scheduler_file,
+        _use_new_zipfile_serialization=False,
+    )
 
 
 def main(local_rank, args):
@@ -73,8 +89,7 @@ def main(local_rank, args):
     pool = multiprocessing.Pool(args.cpu_count)
 
     # data_list = ["data_{}.json".format(i) for i in range(5)]
-    data_tuples, num_train_optimization_steps = get_loaders(args, tokenizer, pool)
-    args.num_train_optimization_steps = num_train_optimization_steps
+    data_list = [os.path.join(args.train_path, f"{lang}_gen.jsonl") for lang in args.langs]
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ["bias", "LayerNorm.weight"]
     optimizer_grouped_parameters = [
@@ -98,11 +113,11 @@ def main(local_rank, args):
     optimizer = AdamW(
         optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon
     )
-    args.warmup_steps = num_train_optimization_steps * 0.1
+    args.warmup_steps = int(args.train_steps * 0.1)
     scheduler = get_linear_schedule_with_warmup(
         optimizer,
         num_warmup_steps=args.warmup_steps,
-        num_training_steps=num_train_optimization_steps,
+        num_training_steps=args.train_steps,
     )
 
     if os.path.exists("{}/checkpoints/optimizer.pt".format(args.output_dir)):
@@ -120,131 +135,87 @@ def main(local_rank, args):
         )
 
     global_step = 0
-    global_epoch = 0
     save_steps = 1000
 
-    probs = [len(d) for (d, _, _) in data_tuples]
-    probs = [x / sum(probs) for x in probs]
-    probs = [x ** 0.7 for x in probs]
-    probs = [x / sum(probs) for x in probs]
-
-    per_epoch_steps = args.num_train_optimization_steps // args.num_train_epochs
-    for _, _, dataloader in data_tuples:
-        dataloader.sampler.set_epoch(global_epoch)
-    model.train()
-    while True:
-        global_step += 1
-        dataset, sampler, dataloader = np.random.choice(data_tuples, 1, p=probs)[0]
-        if global_step % per_epoch_steps == 0:
-            global_epoch += 1
-            if global_epoch > args.num_train_epochs:
-                break
-            for _, _, dataloader in data_tuples:
-                dataloader.sampler.set_epoch(global_epoch)
-        
+    for epoch in range(1, args.train_epochs + 1):
+        data_tuples = get_loaders(data_list, args, tokenizer, pool)        # WARNING: this is a iterator, to save memory
+        model.train()
         nb_tr_examples, nb_tr_steps, tr_loss = 0, 0, 0
-        examples = next(dataloader)
-        tuple_examples = [(ex, tokenizer, args) for ex in examples]
-        features = pool.map(convert_examples_to_features, tuple_examples)
-        source_ids = torch.tensor(
-            [ex.input_ids for ex in features], dtype=torch.long
-        ).to(local_rank)
-        # ///////////////
-        target_ids = torch.tensor(
-            [ex.target_ids for ex in features], dtype=torch.long
-        ).to(local_rank)
-        source_mask = source_ids.ne(tokenizer.pad_token_id)
-        target_mask = target_ids.ne(tokenizer.pad_token_id)
+        chunknum = 0
+        for _, _, dataloader in data_tuples:
+            logger.info(f"Start chunk {chunknum}")
+            chunknum += 1
+            for step, examples in enumerate(dataloader):
+                source_ids = torch.tensor(
+                    [ex.source_ids for ex in examples], dtype=torch.long
+                ).to(local_rank)
+                source_labels = torch.tensor(
+                    [ex.source_labels for ex in examples], dtype=torch.long
+                ).to(local_rank)
+                target_ids = torch.tensor(
+                    [ex.target_ids for ex in examples], dtype=torch.long
+                ).to(local_rank)
+                source_mask = source_ids.ne(tokenizer.pad_id)
+                target_mask = target_ids.ne(tokenizer.pad_id)
 
-        outputs = model(
-            input_ids=source_ids,
-            attention_mask=source_mask,
-            labels=target_ids,
-            decoder_attention_mask=target_mask,
-        )
-        loss = outputs.loss
-
-        if args.n_gpu > 1:
-            loss = loss.mean()  # mean() to average on multi-gpu.
-        if args.gradient_accumulation_steps > 1:
-            loss = loss / args.gradient_accumulation_steps
-        tr_loss += loss.item()
-
-        nb_tr_examples += source_ids.size(0)
-        nb_tr_steps += 1
-        loss.backward()
-
-        if nb_tr_steps % args.gradient_accumulation_steps == 0:
-            # Update parameters
-            optimizer.step()
-            optimizer.zero_grad()
-            scheduler.step()
-            global_step += 1
-            if rank == 0 and local_rank == 0 and global_step % 100 == 0:
-                train_loss = round(
-                    tr_loss
-                    * args.gradient_accumulation_steps
-                    / (nb_tr_steps + 1),
-                    4,
+                loss = model(
+                    input_ids=source_ids,
+                    input_labels=source_labels,
+                    decoder_input_ids=target_ids,
+                    attention_mask=source_mask,
+                    decoder_attention_mask=target_mask,
                 )
-                logger.info(
-                    "step {}/{}: Train loss {}".format(
-                        global_step,
-                        num_train_optimization_steps,
-                        round(train_loss, 3),
+
+                if args.n_gpu > 1:
+                    loss = loss.mean()  # mean() to average on multi-gpu.
+                if args.gradient_accumulation_steps > 1:
+                    loss = loss / args.gradient_accumulation_steps
+                tr_loss += loss.item()
+
+                nb_tr_examples += source_ids.size(0)
+                nb_tr_steps += 1
+                loss.backward()
+
+                if nb_tr_steps % args.gradient_accumulation_steps == 0:
+                    # Update parameters
+                    optimizer.step()
+                    optimizer.zero_grad()
+                    scheduler.step()
+                    global_step += 1
+                    if rank == 0 and local_rank == 0 and global_step % 100 == 0:
+                        train_loss = round(
+                            tr_loss
+                            * args.gradient_accumulation_steps
+                            / (nb_tr_steps + 1),
+                            4,
+                        )
+                        logger.info(
+                            "step {}/{}: Train loss {}".format(
+                                global_step,
+                                args.train_steps,
+                                round(train_loss, 3),
+                            )
+                        )
+                    if global_step == args.train_steps:
+                        output_dir = os.path.join(args.output_dir, "checkpoints")
+                        save_model(model, optimizer, scheduler, output_dir, config)
+                        logger.info("Reach max steps {args.train_steps}.")
+                        time.sleep(5)
+                        return
+
+                if rank == 0 and local_rank == 0 and global_step % save_steps == 0:
+                    output_dir = os.path.join(args.output_dir, "checkpoints")
+                    save_model(model, optimizer, scheduler, output_dir, config)
+                    logger.info(
+                        "Save the {}-step model and optimizer into {}".format(
+                            global_step, output_dir
+                        )
                     )
-                )
-
-        if rank == 0 and local_rank == 0 and global_step % save_steps == 0:
-            # Save the checkpoint for each epoch
-            output_dir = os.path.join(args.output_dir, "checkpoints")
-            if not os.path.exists(output_dir):
-                os.makedirs(output_dir)
-            model_to_save = model.module if hasattr(model, "module") else model
-            config.save_pretrained(output_dir)
-            output_model_file = os.path.join(output_dir, "pytorch_model.bin")
-            torch.save(model_to_save.state_dict(), output_model_file)
-            output_optimizer_file = os.path.join(output_dir, "optimizer.pt")
-            torch.save(
-                optimizer.state_dict(),
-                output_optimizer_file,
-                _use_new_zipfile_serialization=False,
-            )
-            output_scheduler_file = os.path.join(output_dir, "scheduler.pt")
-            torch.save(
-                scheduler.state_dict(),
-                output_scheduler_file,
-                _use_new_zipfile_serialization=False,
-            )
-            logger.info(
-                "Save the {}-step model and optimizer into {}".format(
-                    global_step, output_dir
-                )
-            )
-            time.sleep(5)
-        global_step += 1
-
+                    time.sleep(5)
     if rank == 0 and local_rank == 0:
         # Save the final checkpoint
         output_dir = os.path.join(args.output_dir, "checkpoints")
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-        model_to_save = model.module if hasattr(model, "module") else model
-        config.save_pretrained(output_dir)
-        output_model_file = os.path.join(output_dir, "pytorch_model.bin")
-        torch.save(model_to_save.state_dict(), output_model_file)
-        output_optimizer_file = os.path.join(output_dir, "optimizer.pt")
-        torch.save(
-            optimizer.state_dict(),
-            output_optimizer_file,
-            _use_new_zipfile_serialization=False,
-        )
-        output_scheduler_file = os.path.join(output_dir, "scheduler.pt")
-        torch.save(
-            scheduler.state_dict(),
-            output_scheduler_file,
-            _use_new_zipfile_serialization=False,
-        )
+        save_model(model, optimizer, scheduler, output_dir, config)
         logger.info("Save the trained model and optimizer into {}".format(output_dir))
         time.sleep(5)
 

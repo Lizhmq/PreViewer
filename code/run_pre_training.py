@@ -7,19 +7,17 @@ import numpy as np
 from tqdm import tqdm
 import multiprocessing
 import time
-from utils import convert_examples_to_features, read_review_examples
-import json
-from torch.utils.data import Dataset
+from utils import convert_examples_to_features
 from itertools import cycle
-
-from torch.utils.tensorboard import SummaryWriter
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, RandomSampler
 from torch.utils.data.distributed import DistributedSampler
 from transformers import AdamW, get_linear_schedule_with_warmup
 from models import build_or_load_gen_model
 from configs import add_args, set_seed, set_dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
+from utils import TextDataset
+
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
@@ -29,32 +27,23 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class TextDataset(Dataset):
-    def __init__(self, tokenizer, pool, args, file_path=None):
-        self.examples = read_review_examples(file_path, 100)
-
-    def __len__(self):
-        return len(self.examples)
-
-    def __getitem__(self, i):
-        return self.examples[i]
-
-
-def get_loaders(data_list):
+def get_loaders(args, tokenizer, pool):
+    def fn(examples):
+        feats = pool.map(convert_examples_to_features, [(example, tokenizer, args) for example in examples])
+        # feats = [convert_examples_to_features((example, tokenizer, args)) for example in examples]
+        return feats
     num_train_optimization_steps = 0
+    data_tuples = []
+    data_list = [os.path.join(args.train_path, f"{lang}_gen.jsonl") for lang in args.langs]
     for data_file in data_list:
-        data_file = os.path.join(args.train_filename, data_file)
         dataset = TextDataset(tokenizer, pool, args, data_file)
-        sampler = DistributedSampler(dataset)
-        dataloader = 
-            cycle(
-                DataLoader(
-                    dataset, sampler=sampler, batch_size=args.train_batch_size
-                )
-            )
+        # sampler = DistributedSampler(dataset)
+        sampler = RandomSampler(dataset)
+        dataloader = DataLoader(dataset, sampler=sampler, batch_size=args.train_batch_size, collate_fn=fn)
         num_train_optimization_steps += args.num_train_epochs * len(dataloader) * args.gradient_accumulation_steps
-        data_tuple.append((dataset, sampler, dataloader))
-    return data_tuple, num_train_optimization_steps
+        dataloader = cycle(dataloader)
+        data_tuples.append((dataset, sampler, dataloader))
+    return data_tuples, num_train_optimization_steps
 
 
 def main(local_rank, args):
@@ -81,12 +70,10 @@ def main(local_rank, args):
             torch.load("{}/checkpoints/pytorch_model.bin".format(args.output_dir))
         )
     model = DDP(model.cuda(), device_ids=[local_rank], output_device=local_rank)
-    pool = multiprocessing.Pool(args.cpu_cont)
+    pool = multiprocessing.Pool(args.cpu_count)
 
     # data_list = ["data_{}.json".format(i) for i in range(5)]
-    data_list = [os.path.join(args.train_path, f"{lang}_cls.jsonl" for lang in args.langs]
-          + [os.path.join(args.train_path, f"{lang}_gen.jsonl" for lang in args.langs]
-    data_tuple, num_train_optimization_steps = get_loaders(data_list)
+    data_tuples, num_train_optimization_steps = get_loaders(args, tokenizer, pool)
     args.num_train_optimization_steps = num_train_optimization_steps
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ["bias", "LayerNorm.weight"]
@@ -136,13 +123,13 @@ def main(local_rank, args):
     global_epoch = 0
     save_steps = 1000
 
-    probs = [len(d) for (d, _, _) in data_tuple]
+    probs = [len(d) for (d, _, _) in data_tuples]
     probs = [x / sum(probs) for x in probs]
     probs = [x ** 0.7 for x in probs]
     probs = [x / sum(probs) for x in probs]
 
     per_epoch_steps = args.num_train_optimization_steps // args.num_train_epochs
-    for _, _, dataloader in data_tuple:
+    for _, _, dataloader in data_tuples:
         dataloader.sampler.set_epoch(global_epoch)
     model.train()
     while True:
@@ -152,12 +139,11 @@ def main(local_rank, args):
             global_epoch += 1
             if global_epoch > args.num_train_epochs:
                 break
-            # data_tuple, __ = get_loaders(data_list)
-            for _, _, dataloader in data_tuple:
+            for _, _, dataloader in data_tuples:
                 dataloader.sampler.set_epoch(global_epoch)
         
         nb_tr_examples, nb_tr_steps, tr_loss = 0, 0, 0
-        example = next(dataloader)
+        examples = next(dataloader)
         tuple_examples = [(ex, tokenizer, args) for ex in examples]
         features = pool.map(convert_examples_to_features, tuple_examples)
         source_ids = torch.tensor(
@@ -279,6 +265,6 @@ if __name__ == "__main__":
     # args.train_batch_size = 5
     # args.max_source_length = 512
     # args.max_target_length = 256
-    args.cpu_cont = multiprocessing.cpu_count()
+    args.cpu_count = multiprocessing.cpu_count()
     logger.info(args)
     torch.multiprocessing.spawn(main, args=(args,), nprocs=torch.cuda.device_count())

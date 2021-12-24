@@ -70,7 +70,11 @@ while True:
     if sum(lens) == 0:
         break
     fp, lang = fps[idx], langs[idx]
-    dic = json.loads(next(fp))
+    try:
+        dic = json.loads(next(fp))
+    except:
+        print("JSON decoding error.")
+        continue
     dic = regurize(dic)
     if dic == {}:
         continue

@@ -11,6 +11,7 @@ from transformers import (
     BartForConditionalGeneration,
     BartTokenizer,
     T5Config,
+    T5Model,
     T5ForConditionalGeneration,
     T5Tokenizer,
 )
@@ -20,10 +21,89 @@ logger = logging.getLogger(__name__)
 
 MODEL_CLASSES = {
     "roberta": (RobertaConfig, RobertaModel, RobertaTokenizer),
-    "t5": (T5Config, T5ForConditionalGeneration, T5Tokenizer),
+    "t5": (T5Config, T5Model, RobertaTokenizer),
     "codet5": (T5Config, T5ForConditionalGeneration, RobertaTokenizer),
     "bart": (BartConfig, BartForConditionalGeneration, BartTokenizer),
 }
+
+
+def load_t5(
+    config,
+    model,
+    tokenizer_class,
+    load_extra_ids=True,
+    add_lang_ids=False,
+    tokenizer_path="",
+    from_scratch=False
+):
+    if not tokenizer_path:
+        tokenizer_path = "t5-base"
+    # tokenizer = tokenizer_class.from_pretrained(tokenizer_path)
+    tokenizer = tokenizer_class.from_pretrained("Salesforce/codet5-base")
+    
+    # T5 has <pad> <s> </s> <unk> <mask>
+    # tokenizer.add_special_tokens(
+    #     {"additional_special_tokens": ["<s>", "<mask>"]}
+    # )
+    if load_extra_ids:
+        tokenizer.add_special_tokens(
+            {
+                "additional_special_tokens": [
+                    "<extra_id_{}>".format(i) for i in range(99, -1, -1)
+                ]
+            }
+        )
+        tokenizer.add_special_tokens(
+            {
+                "additional_special_tokens": [
+                    "<e{}>".format(i) for i in range(99, -1, -1)
+                ]
+            }
+        )
+        tokenizer.add_special_tokens({"additional_special_tokens": ["<msg>"]})
+    langs = [
+        "<en>",
+        "<python>",
+        "<java>",
+        "<javascript>",
+        "<ruby>",
+        "<php>",
+        "<go>",
+        "<c>",
+        "<c_sharp>",
+        "<c_plus_plus>",
+    ]
+    if add_lang_ids:
+        tokenizer.add_special_tokens(
+            {
+                "additional_special_tokens": langs
+            }
+        )
+        config.lang_id = {
+            lang: tokenizer.get_vocab()[lang] for lang in langs
+        }
+    config.vocab_size = len(tokenizer)
+    config.bos_token_id = tokenizer.get_vocab()["<s>"]
+    config.pad_token_id = tokenizer.get_vocab()["<pad>"]
+    config.eos_token_id = tokenizer.get_vocab()["</s>"]
+    config.mask_token_id = tokenizer.get_vocab()["<mask>"]
+    config.lang_tokens = langs
+    model.config = config  # changing the default config of T5
+    model.resize_token_embeddings(len(tokenizer))
+    tokenizer.special_dict = {
+        f"<e{i}>" : tokenizer.get_vocab()[f"<e{i}>"] for i in range(99, -1, -1)
+    }
+    # confusing api...
+    tokenizer.mask_id = tokenizer.get_vocab()["<mask>"]
+    tokenizer.bos_id = tokenizer.get_vocab()["<s>"]
+    tokenizer.pad_id = tokenizer.get_vocab()["<pad>"]
+    tokenizer.eos_id = tokenizer.get_vocab()["</s>"]
+    tokenizer.msg_id = tokenizer.get_vocab()["<msg>"]
+
+    if from_scratch:
+        model = T5Model(config)
+
+    return config, model, tokenizer
 
 
 def load_codet5(
@@ -79,7 +159,6 @@ def load_codet5(
     config.pad_token_id = 0
     config.bos_token_id = 1
     config.eos_token_id = 2
-
     model.config = config  # changing the default config of T5
     model.resize_token_embeddings(len(tokenizer))
     return config, model, tokenizer
@@ -92,39 +171,21 @@ def get_model_size(model):
 
 
 def build_or_load_gen_model(args):
+    assert args.model_type == "t5"  # only t5 supported now
     config_class, model_class, tokenizer_class = MODEL_CLASSES[args.model_type]
     config = config_class.from_pretrained(
         args.config_name if args.config_name else args.model_name_or_path
     )
-    if args.model_type != "codet5":
-        tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name)
-    if args.model_type == "roberta":
-        encoder = model_class.from_pretrained(args.model_name_or_path, config=config)
-        decoder_layer = nn.TransformerDecoderLayer(
-            d_model=config.hidden_size, nhead=config.num_attention_heads
-        )
-        decoder = nn.TransformerDecoder(decoder_layer, num_layers=6)
-        model = Seq2Seq(
-            encoder=encoder,
-            decoder=decoder,
-            config=config,
-            beam_size=args.beam_size,
-            max_length=args.max_target_length,
-            sos_id=tokenizer.cls_token_id,
-            eos_id=tokenizer.sep_token_id,
-        )
-    else:
-        model = model_class.from_pretrained(args.model_name_or_path)
-
-    if args.model_type == "codet5":
-        # reset special ids: pad_token_id = 0, bos_token_id = 1, eos_token_id = 2
-        config, model, tokenizer = load_codet5(
-            config,
-            model,
-            tokenizer_class,
-            add_lang_ids=args.add_lang_ids,
-            tokenizer_path=args.tokenizer_path,
-        )
+    model = model_class.from_pretrained(args.model_name_or_path)
+    # reset special ids: pad_token_id = 0, bos_token_id = 1, eos_token_id = 2
+    config, model, tokenizer = load_t5(
+        config,
+        model,
+        tokenizer_class,
+        add_lang_ids=args.add_lang_ids,
+        tokenizer_path=args.tokenizer_path,
+        from_scratch=args.from_scratch
+    )
     logger.info(
         "Finish loading model [%s] from %s",
         get_model_size(model),
@@ -134,7 +195,6 @@ def build_or_load_gen_model(args):
     if args.load_model_path is not None:
         logger.info("Reload model from {}".format(args.load_model_path))
         model.load_state_dict(torch.load(args.load_model_path))
-
     return config, model, tokenizer
 
 

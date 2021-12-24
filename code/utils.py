@@ -1,81 +1,85 @@
-import json
-from copy import deepcopy as cp
+import re, json
+import random
+from torch.utils.data import Dataset
+
+
+class TextDataset(Dataset):
+    def __init__(self, tokenizer, pool, args, file_path=None):
+        self.examples = read_review_examples(file_path, 1)
+
+    def __len__(self):
+        return len(self.examples)
+
+    def __getitem__(self, i):
+        return self.examples[i]
 
 
 def convert_examples_to_features(item):
     example, tokenizer, args = item
-    prevlines = [tokenizer.encode(source_str) for source_str in example.prevlines])]
-    afterlines = [tokenizer.encode(source_str) for source_str in example.afterlines])]
-    lines = [tokenizer.encode(source_str) for source_str in example.lines])]
-    labels = cp(example.labels)
+    # [1:-1] to remove <s> and </s>
+    prevlines = [tokenizer.encode(source_str)[1:-1] for source_str in example.prevlines]
+    afterlines = [tokenizer.encode(source_str)[1:-1] for source_str in example.afterlines]
+    lines = [tokenizer.encode(source_str)[1:-1] for source_str in example.lines]
+    labels = list(example.labels)
     inputl = len(lines)
     inputl += sum(map(len, lines))
     prev_after_len = max(len(prevlines), len(afterlines))
+    left, right = 0, len(lines)
+    while inputl > args.max_source_length - 2:
+        if left % 2 == 0:
+            left += 1
+            inputl -= len(lines[left]) + 1
+        else:
+            right -= 1
+            inputl -= len(lines[right]) + 1
     i = 0
-    while inputl < args.max_input_length - 2 and i < prev_after_len:
+    while inputl < args.max_source_length - 2 and i < prev_after_len:
         if i < len(prevlines):
             newl = inputl + len(prevlines[-1-i]) + 1
-            if newl > args.max_input_length - 2:
+            if newl > args.max_source_length - 2:
                 break
             lines.insert(0, prevlines[-1-i])
-            labels.insert(0, 2)
+            labels.insert(0, -100)
             inputl = newl  # tag
         if i < len(afterlines):
             newl = inputl + len(afterlines[i]) + 1
-            if newl > args.max_input_length - 2:
+            if newl > args.max_source_length - 2:
                 break
             lines.append(afterlines[i])
-            labels.append(2)
+            labels.append(-100)
             inputl = newl    # tag
         i += 1
-    assert inputl <= args.max_input_length - 2
-    source_ids = []
-    for i, line, label in enumerate(zip(lines, labels)):
-        
-    
-
-def cconvert_examples_to_features(item):
-    example, example_index, tokenizer, args, stage = item
-
-    if args.model_type in ["t5", "codet5"] and args.add_task_prefix:
-        if args.sub_task != "none":
-            source_str = "{} {}: {}".format(args.task, args.sub_task, example.source)
+    assert inputl <= args.max_source_length - 2, "Too long inputs."
+    source_ids, input_labels, target_ids = [], [], []
+    SPECIAL_ID = 0
+    mask_idxs = random.choices(range(len(lines)), k=int(len(lines) * args.mask_rate))
+    for i, (line, label) in enumerate(zip(lines, labels)):
+        source_ids.append(tokenizer.special_dict[f"<e{SPECIAL_ID}>"])
+        input_labels.append(label)
+        if i in mask_idxs:
+            source_ids.append(tokenizer.mask_id)
+            input_labels.append(-100)
+            target_ids.append(tokenizer.special_dict[f"<e{SPECIAL_ID}>"])
+            target_ids.extend(line)
         else:
-            source_str = "{}: {}".format(args.task, example.source)
-    else:
-        source_str = example.source
-
-    source_str = source_str.replace("</s>", "<unk>")
-    source_ids = tokenizer.encode(
-        source_str,
-        max_length=args.max_source_length,
-        padding="max_length",
-        truncation=True,
-    )
-    assert source_ids.count(tokenizer.eos_token_id) == 1
-    if stage == "test":
-        target_ids = []
-    else:
-        target_str = example.target
-        if args.add_lang_ids:
-            target_str = add_lang_by_task(example.target, args.task, args.sub_task)
-        if args.task in ["defect", "clone"]:
-            if target_str == 0:
-                target_str = "false"
-            elif target_str == 1:
-                target_str = "true"
-            else:
-                raise NameError
-        target_str = target_str.replace("</s>", "<unk>")
-        target_ids = tokenizer.encode(
-            target_str,
-            max_length=args.max_target_length,
-            padding="max_length",
-            truncation=True,
-        )
-        assert target_ids.count(tokenizer.eos_token_id) == 1
-
-    return InputFeatures(example_index, source_ids, target_ids, url=example.url)
+            source_ids.extend(line)
+            input_labels.extend([-100] * len(line))
+        if SPECIAL_ID < 99:     # only 0-99 ids in vocab
+            SPECIAL_ID += 1
+    if example.msg != "":
+        target_ids.append(tokenizer.msg_id)
+        target_ids.extend(tokenizer.encode(example.msg)[1:-1])
+    assert len(input_labels) == len(source_ids)
+    input_labels = [-100] + input_labels + [-100]
+    source_ids = [tokenizer.bos_id] + source_ids + [tokenizer.eos_id]
+    pad_len = args.max_source_length - len(source_ids)
+    source_ids += [tokenizer.pad_id] * pad_len
+    input_labels += [-100] * pad_len
+    target_ids = target_ids[:args.max_target_length - 2]
+    target_ids = [tokenizer.bos_id] + target_ids + [tokenizer.eos_id]
+    pad_len = args.max_target_length - len(target_ids)
+    target_ids += [tokenizer.pad_id] * pad_len
+    return ReviewFeatures(example.idx, source_ids, input_labels, target_ids)
 
 
 class InputFeatures(object):
@@ -123,6 +127,7 @@ class ReviewExample(object):
         self.afterlines = []
         self.lines = []
         self.labels = []
+        self.avail = False
         self.align_and_clean()
 
     def remove_space(self, line):
@@ -142,7 +147,12 @@ class ReviewExample(object):
         first_line = difflines[0]
         difflines = difflines[1:]
         regex = r"@@ -(\d+),(\d+) \+(\d+),(\d+) @@"
-        startline, endline, startpos, endpos = re.match(regex, first_line).groups()
+        matchres = re.match(regex, first_line)
+        if matchres:
+            startline, endline, startpos, endpos = matchres.groups()
+            self.avail = True
+        else:
+            return
         startline, endline = int(startline) - 1, int(endline) - 1
         self.prevlines = oldflines[:startline]
         self.afterlines = oldflines[endline + 1 :]
@@ -179,16 +189,19 @@ def read_review_examples(filename, data_num):
     with open(filename) as f:
         for line in f:
             js = json.loads(line.strip())
-            examples.append(
-                ReviewExample(
-                    idx=idx,
-                    oldf=js["oldf"],
-                    diff=js["patch"],
-                    msg=js["msg"] if "msg" in js else "",
-                    cmtid=js["cmtid"] if "cmtid" in js else "",
-                )
-            )
-            idx += 1
-            if idx == data_num:
-                break
+            example = ReviewExample(
+                        idx=idx,
+                        oldf=js["oldf"],
+                        diff=js["patch"],
+                        msg=js["msg"] if "msg" in js else "",
+                        cmtid=js["cmtid"] if "cmtid" in js else "",
+                    )
+            if example.avail:
+                examples.append(example)
+                idx += 1
+                if idx == data_num:
+                    break
+            else:
+                print("Passing invalid diff.")
+                
     return examples

@@ -13,22 +13,12 @@ def add_args(parser):
         type=str,
         required=False,
         choices=[
-            "summarize",
-            "summarize_intent",
-            "refine",
-            "translate",
-            "concode",
-            "clone",
-            "defect",
-            "refine_intent",
+            "review",
         ],
     )
-    parser.add_argument("--sub_task", type=str, default="")
-    parser.add_argument("--lang", type=str, default="")
-    parser.add_argument("--eval_task", type=str, default="")
     parser.add_argument(
         "--model_type",
-        default="roberta",
+        default="t5",
         type=str,
         choices=["roberta", "t5", "bart", "codet5"],
     )
@@ -59,7 +49,7 @@ def add_args(parser):
     ## Required parameters
     parser.add_argument(
         "--model_name_or_path",
-        default="roberta-base",
+        default="t5-base",
         type=str,
         help="Path to pre-trained model: e.g. roberta-base",
     )
@@ -98,7 +88,7 @@ def add_args(parser):
 
     parser.add_argument(
         "--config_name",
-        default="",
+        default="t5-base",
         type=str,
         help="Pretrained config name or path if not the same as model_name",
     )
@@ -108,7 +98,6 @@ def add_args(parser):
         type=str,
         help="Pretrained tokenizer name or path if not the same as model_name",
     )
-    parser.add_argument("--block_size", default=512, type=int)
     parser.add_argument(
         "--max_source_length",
         default=64,
@@ -123,7 +112,6 @@ def add_args(parser):
         help="The maximum total target sequence length after tokenization. Sequences longer "
         "than this will be truncated, sequences shorter will be padded.",
     )
-
     parser.add_argument(
         "--do_train", action="store_true", help="Whether to run eval on the train set."
     )
@@ -141,7 +129,6 @@ def add_args(parser):
     parser.add_argument(
         "--no_cuda", action="store_true", help="Avoid using CUDA when available"
     )
-
     parser.add_argument(
         "--train_batch_size",
         default=8,
@@ -182,11 +169,6 @@ def add_args(parser):
         "--max_grad_norm", default=1.0, type=float, help="Max gradient norm."
     )
     parser.add_argument(
-        "--num_group", default=5, type=int, help="Number of data group."
-    )
-    parser.add_argument("--data_type", default="code_only", type=str, help="data type.")
-
-    parser.add_argument(
         "--save_steps", default=-1, type=int,
     )
     parser.add_argument(
@@ -210,18 +192,9 @@ def add_args(parser):
         help="For distributed training: local_rank",
     )
     parser.add_argument(
-        "--seed", type=int, default=1234, help="random seed for initialization"
+        "--seed", type=int, default=2233, help="random seed for initialization"
     )  # previous one 42
     args = parser.parse_args()
-
-    if args.task in ["summarize"]:
-        args.lang = args.sub_task
-    elif args.task in ["refine", "concode", "clone"]:
-        args.lang = "java"
-    elif args.task == "defect":
-        args.lang = "c"
-    elif args.task == "translate":
-        args.lang = "c_sharp" if args.sub_task == "java-cs" else "java"
     return args
 
 

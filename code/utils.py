@@ -7,7 +7,7 @@ from transformers import RobertaTokenizer
 
 class TextDataset(Dataset):
     def __init__(self, tokenizer, pool, args, file_path=None):
-        self.examples = read_review_examples(file_path, 100)
+        self.examples = read_review_examples(file_path, -1)
 
     def __len__(self):
         return len(self.examples)
@@ -20,7 +20,7 @@ def convert_examples_to_features(item):
     example, tokenizer, args = item
     # [1:-1] to remove <s> and </s>
     def encode_remove(tokenizer, text):
-        text = tokenizer.encode(text)
+        text = tokenizer.encode(text, max_length=args.max_source_length - 2)
         if type(tokenizer) == T5Tokenizer:
             return text[:-1]
         elif type(tokenizer) == RobertaTokenizer:
@@ -37,8 +37,8 @@ def convert_examples_to_features(item):
     left, right = 0, len(lines)
     while inputl > args.max_source_length - 2:
         if left % 2 == 0:
-            left += 1
             inputl -= len(lines[left]) + 1
+            left += 1
         else:
             right -= 1
             inputl -= len(lines[right]) + 1
@@ -47,6 +47,7 @@ def convert_examples_to_features(item):
     while inputl < args.max_source_length - 2 and i < prev_after_len:
         if i < len(prevlines):
             newl = inputl + len(prevlines[-1-i]) + 1
+            assert len(prevlines[-1-i]) > 0, "Zero length line."
             if newl > args.max_source_length - 2:
                 break
             lines.insert(0, prevlines[-1-i])
@@ -54,6 +55,7 @@ def convert_examples_to_features(item):
             inputl = newl  # tag
         if i < len(afterlines):
             newl = inputl + len(afterlines[i]) + 1
+            assert len(afterlines[i]) > 0, "Zero length line."
             if newl > args.max_source_length - 2:
                 break
             lines.append(afterlines[i])
@@ -91,6 +93,9 @@ def convert_examples_to_features(item):
     target_ids = [tokenizer.bos_id] + target_ids + [tokenizer.eos_id]
     pad_len = args.max_target_length - len(target_ids)
     target_ids += [tokenizer.pad_id] * pad_len
+    assert len(source_ids) == args.max_source_length, "Not equal length."
+    assert len(input_labels) == args.max_source_length, "Not equal length."
+    assert len(target_ids) == args.max_target_length, "Not equal length."
     return ReviewFeatures(example.idx, source_ids, input_labels, target_ids)
 
 
@@ -214,6 +219,8 @@ def read_review_examples(filename, data_num):
                 if idx == data_num:
                     break
             else:
-                print("Passing invalid diff.")
+                # print("Passing invalid diff.")
+                # about 1/10000, let's do not print
+                pass
                 
     return examples

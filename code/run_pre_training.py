@@ -63,14 +63,15 @@ def save_model(model, optimizer, scheduler, output_dir, config):
 
 
 def main(args):
-    args.train_batch_size = args.train_batch_size * args.gpu_per_node
     dist.init_process_group(backend="nccl")
+    # args.train_batch_size = args.train_batch_size * dist.get_world_size()
     local_rank = dist.get_rank() % args.gpu_per_node
     args.global_rank = local_rank + args.node_index * args.gpu_per_node
     args.local_rank = local_rank
-    logger.warning("Process rank: %s, global rank: %s, distributed training: %s, world size: %s",
-                   args.local_rank, args.global_rank, bool(args.local_rank != -1), 
-                   torch.distributed.get_world_size() if args.local_rank != -1 else 1)
+    logger.warning("Process rank: %s, global rank: %s, distributed training: %s, world size: %s, bs: %s",
+                   args.local_rank, args.global_rank, bool(args.local_rank != -1), \
+                   torch.distributed.get_world_size() if args.local_rank != -1 else 1, \
+                   args.train_batch_size)
     torch.cuda.set_device(local_rank)
 
     t0 = time.time()

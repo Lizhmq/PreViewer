@@ -11,7 +11,6 @@ from transformers import (
     BartForConditionalGeneration,
     BartTokenizer,
     T5Config,
-    T5Model,
     T5ForConditionalGeneration,
     T5Tokenizer,
 )
@@ -120,7 +119,7 @@ class ReviewerModel(T5ForConditionalGeneration):
 
 MODEL_CLASSES = {
     "roberta": (RobertaConfig, RobertaModel, RobertaTokenizer),
-    "t5": (T5Config, T5ForConditionalGeneration, RobertaTokenizer),
+    "t5": (T5Config, ReviewerModel, T5Tokenizer),
     "codet5": (T5Config, ReviewerModel, RobertaTokenizer),
     "bart": (BartConfig, BartForConditionalGeneration, BartTokenizer),
 }
@@ -134,15 +133,17 @@ def load_t5(
     tokenizer_path="",
     from_scratch=False
 ):
-    if not tokenizer_path:
-        tokenizer_path = "t5-base"
+    if not tokenizer_path:      # default codet5 tokenizer
+        tokenizer_path = "Salesforce/codet5-base"
     tokenizer = tokenizer_class.from_pretrained(tokenizer_path)
-    # tokenizer = tokenizer_class.from_pretrained("Salesforce/codet5-base")
     
-    # T5 has <pad> <s> </s> <unk> <mask>
-    # tokenizer.add_special_tokens(
-    #     {"additional_special_tokens": ["<s>", "<mask>"]}
-    # )
+    adds = ["<pad>", "<s>", "</s>", "<unk>", "<mask>"]
+    adds = [tok for tok in adds if tok not in tokenizer.get_vocab()]
+    # CodeT5 has <pad> <s> </s> <unk> <mask>
+    if adds:
+        tokenizer.add_special_tokens(
+            {"additional_special_tokens": adds}
+        )
     if load_extra_ids:
         tokenizer.add_special_tokens(
             {
@@ -204,64 +205,6 @@ def load_t5(
     return config, model, tokenizer
 
 
-def load_codet5(
-    config,
-    model,
-    tokenizer_class,
-    load_extra_ids=True,
-    add_lang_ids=False,
-    tokenizer_path="CodeT5/tokenizer/salesforce",
-):
-    vocab_fn = "{}/codet5-vocab.json".format(tokenizer_path)
-    merge_fn = "{}/codet5-merges.txt".format(tokenizer_path)
-    tokenizer = tokenizer_class(vocab_fn, merge_fn, model_max_length=512)
-
-    tokenizer.add_special_tokens(
-        {"additional_special_tokens": ["<pad>", "<s>", "</s>", "<unk>", "<mask>"]}
-    )
-
-    if load_extra_ids:
-        tokenizer.add_special_tokens(
-            {
-                "additional_special_tokens": [
-                    "<extra_id_{}>".format(i) for i in range(99, -1, -1)
-                ]
-            }
-        )
-        tokenizer.add_special_tokens(
-            {
-                "additional_special_tokens": [
-                    "<e{}>".format(i) for i in range(99, -1, -1)
-                ]
-            }
-        )
-    if add_lang_ids:
-        tokenizer.add_special_tokens(
-            {
-                "additional_special_tokens": [
-                    "<en>",
-                    "<python>",
-                    "<java>",
-                    "<javascript>",
-                    "<ruby>",
-                    "<php>",
-                    "<go>",
-                    "<c>",
-                    "<c_sharp>",
-                    "<c_plus_plus>",
-                ]
-            }
-        )
-    config.num_labels = 1
-    config.vocab_size = len(tokenizer)
-    config.pad_token_id = 0
-    config.bos_token_id = 1
-    config.eos_token_id = 2
-    model.config = config  # changing the default config of T5
-    model.resize_token_embeddings(len(tokenizer))
-    return config, model, tokenizer
-
-
 def get_model_size(model):
     model_parameters = filter(lambda p: p.requires_grad, model.parameters())
     model_size = sum([np.prod(p.size()) for p in model_parameters])
@@ -269,13 +212,17 @@ def get_model_size(model):
 
 
 def build_or_load_gen_model(args):
-    assert args.model_type == "codet5"  # only t5 supported now
+    assert args.model_type.lower() in ["codet5", "t5"]  # only t5 supported now
     config_class, model_class, tokenizer_class = MODEL_CLASSES[args.model_type]
     config = config_class.from_pretrained(
         args.config_name if args.config_name else args.model_name_or_path
     )
+    if not args.model_name_or_path:
+        if args.model_type == "codet5":
+            args.model_name_or_path = "Salesforce/codet5-base"
+        else:
+            args.model_name_or_path = "t5-base"
     model = model_class.from_pretrained(args.model_name_or_path)
-    # reset special ids: pad_token_id = 0, bos_token_id = 1, eos_token_id = 2
     config, model, tokenizer = load_t5(
         config,
         model,

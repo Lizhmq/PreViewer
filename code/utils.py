@@ -1,6 +1,8 @@
 import re, json
 import random
 from torch.utils.data import Dataset
+from transformers import T5Tokenizer
+from transformers import RobertaTokenizer
 
 
 class TextDataset(Dataset):
@@ -17,9 +19,17 @@ class TextDataset(Dataset):
 def convert_examples_to_features(item):
     example, tokenizer, args = item
     # [1:-1] to remove <s> and </s>
-    prevlines = [tokenizer.encode(source_str)[1:-1] for source_str in example.prevlines]
-    afterlines = [tokenizer.encode(source_str)[1:-1] for source_str in example.afterlines]
-    lines = [tokenizer.encode(source_str)[1:-1] for source_str in example.lines]
+    def encode_remove(tokenizer, text):
+        text = tokenizer.encode(text)
+        if type(tokenizer) == T5Tokenizer:
+            return text[:-1]
+        elif type(tokenizer) == RobertaTokenizer:
+            return text[1:-1]
+        else:
+            raise NotImplementedError
+    prevlines = [encode_remove(tokenizer, source_str) for source_str in example.prevlines]
+    afterlines = [encode_remove(tokenizer, source_str) for source_str in example.afterlines]
+    lines = [encode_remove(tokenizer, source_str) for source_str in example.lines]
     labels = list(example.labels)
     inputl = len(lines)
     inputl += sum(map(len, lines))
@@ -69,7 +79,7 @@ def convert_examples_to_features(item):
             SPECIAL_ID += 1
     if example.msg != "":
         target_ids.append(tokenizer.msg_id)
-        target_ids.extend(tokenizer.encode(example.msg)[1:-1])
+        target_ids.extend(encode_remove(tokenizer, example.msg))
     assert len(input_labels) == len(source_ids), "Not equal length."
     assert len(input_labels) <= args.max_source_length - 2, "Too long inputs."
     input_labels = [-100] + input_labels + [-100]

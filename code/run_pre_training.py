@@ -62,26 +62,15 @@ def save_model(model, optimizer, scheduler, output_dir, config):
     )
 
 
-def main(local_rank, args):
-    LOCAL = os.environ["CUDA_VISIBLE_DEVICES"] == "0"
-    if LOCAL:
-        # means local here
-        os.environ["MASTER_IP"] = "*"
-        os.environ["MASTER_PORT"] = "22333"
-        os.environ["WORLD_SIZE"] = "1"
-        os.environ["RANK"] = "0"
+def main(args):
     gpus = torch.cuda.device_count()
     args.n_gpu = gpus
-    ip = os.environ["MASTER_IP"]
-    port = os.environ["MASTER_PORT"]
-    hosts = int(os.environ["WORLD_SIZE"])
-    rank = int(os.environ["RANK"])
-    dist.init_process_group(
-        backend="nccl",
-        init_method=f"tcp://{ip}:{port}",
-        world_size=hosts * gpus,
-        rank=rank * gpus + local_rank,
-    )
+    local_rank = args.local_rank
+    args.local_rank += args.node_index * args.gpu_per_node
+    dist.init_process_group(backend="nccl")
+    logger.warning("Process rank: %s, distributed training: %s, world size: %s",
+                   args.local_rank, bool(args.local_rank != -1), 
+                   torch.distributed.get_world_size() if args.local_rank != -1 else 1)
     torch.cuda.set_device(local_rank)
 
     t0 = time.time()
@@ -95,7 +84,14 @@ def main(local_rank, args):
     model = DDP(model.cuda(), device_ids=[local_rank], output_device=local_rank)
     pool = multiprocessing.Pool(args.cpu_count)
 
-    data_list = [os.path.join(args.train_path, f"{lang}_gen.jsonl") for lang in args.langs]
+    if args.debug:
+        data_list = [os.path.join(args.train_path, f"ruby_gen.jsonl")]
+        args.save_steps = 50
+        args.log_steps = 5
+        args.train_steps = 200
+    else:
+        files = [file for file in os.listdir(args.train_path) if file.startswith("chunk")]
+        data_list = [os.path.join(args.train_path, file) for file in files]
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ["bias", "LayerNorm.weight"]
     optimizer_grouped_parameters = [
@@ -152,6 +148,12 @@ def main(local_rank, args):
             logger.info(f"Start chunk {chunknum}")
             chunknum += 1
             for step, examples in enumerate(dataloader):
+                if step == 0:
+                    ex = examples[0]
+                    logger.info(f"batch size: {len(examples)}")
+                    logger.info(f"example source: {tokenizer.convert_ids_to_tokens(ex.source_ids)}")
+                    # logger.info(f"example label: {tokenizer.convert_ids_to_tokens(ex.source_labels)}")
+                    logger.info(f"example target: {tokenizer.convert_ids_to_tokens(ex.target_ids)}")
                 source_ids = torch.tensor(
                     [ex.source_ids for ex in examples], dtype=torch.long
                 ).to(local_rank)
@@ -188,7 +190,7 @@ def main(local_rank, args):
                     optimizer.zero_grad()
                     scheduler.step()
                     global_step += 1
-                    if rank == 0 and local_rank == 0 and global_step % args.log_steps == 0:
+                    if args.node_index == 0 and local_rank == 0 and global_step % args.log_steps == 0:
                         train_loss = round(
                             tr_loss
                             * args.gradient_accumulation_steps
@@ -209,7 +211,7 @@ def main(local_rank, args):
                         time.sleep(5)
                         return
 
-                if rank == 0 and local_rank == 0 and global_step % save_steps == 0:
+                if args.node_index == 0 and local_rank == 0 and global_step % save_steps == 0:
                     output_dir = os.path.join(args.output_dir, "checkpoints-" + str(global_step))
                     save_model(model, optimizer, scheduler, output_dir, config)
                     logger.info(
@@ -218,7 +220,7 @@ def main(local_rank, args):
                         )
                     )
                     time.sleep(5)
-    if rank == 0 and local_rank == 0:
+    if args.node_index == 0 and local_rank == 0:
         # Save the final checkpoint
         output_dir = os.path.join(args.output_dir, "checkpoints")
         save_model(model, optimizer, scheduler, output_dir, config)
@@ -230,7 +232,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     args = add_args(parser)
     args.cpu_count = multiprocessing.cpu_count()
-    args.langs = ["ruby"]
     logger.info(args)
-    # main(0, args)
-    torch.multiprocessing.spawn(main, args=(args,), nprocs=torch.cuda.device_count())
+    main(args)
+    # torch.multiprocessing.spawn(main, args=(args,), nprocs=torch.cuda.device_count())

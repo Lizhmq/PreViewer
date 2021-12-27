@@ -24,6 +24,7 @@ def add_args(parser):
     )
     parser.add_argument("--add_lang_ids", action="store_true")
     parser.add_argument("--from_scratch", action="store_true")
+    parser.add_argument("--debug", action="store_true")
     parser.add_argument("--start_epoch", default=0, type=int)
     parser.add_argument("--train_epochs", default=10, type=int)
     parser.add_argument("--tokenizer_path", type=str, required=False)
@@ -158,6 +159,18 @@ def add_args(parser):
     parser.add_argument("--train_steps", default=-1, type=int, help="")
     parser.add_argument(
         "--warmup_steps", default=100, type=int, help="Linear warmup over warmup_steps."
+    )
+    parser.add_argument(
+        "--gpu_per_node",
+        type=int,
+        default=4,
+        help="gpus per node",
+    )
+    parser.add_argument(
+        "--node_index",
+        type=int,
+        default=0,
+        help="For distributed training: node_index",
     )
     parser.add_argument(
         "--local_rank",

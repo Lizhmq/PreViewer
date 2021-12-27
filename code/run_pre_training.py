@@ -63,13 +63,13 @@ def save_model(model, optimizer, scheduler, output_dir, config):
 
 
 def main(args):
-    gpus = torch.cuda.device_count()
-    args.n_gpu = gpus
-    local_rank = args.local_rank
-    args.local_rank += args.node_index * args.gpu_per_node
+    args.train_batch_size = args.train_batch_size * args.gpu_per_node
     dist.init_process_group(backend="nccl")
-    logger.warning("Process rank: %s, distributed training: %s, world size: %s",
-                   args.local_rank, bool(args.local_rank != -1), 
+    local_rank = dist.get_rank() % args.gpu_per_node
+    args.global_rank = local_rank + args.node_index * args.gpu_per_node
+    args.local_rank = local_rank
+    logger.warning("Process rank: %s, global rank: %s, distributed training: %s, world size: %s",
+                   args.local_rank, args.global_rank, bool(args.local_rank != -1), 
                    torch.distributed.get_world_size() if args.local_rank != -1 else 1)
     torch.cuda.set_device(local_rank)
 
@@ -147,8 +147,8 @@ def main(args):
         for _, _, dataloader in data_tuples:
             logger.info(f"Start chunk {chunknum}")
             chunknum += 1
-            for step, examples in enumerate(dataloader):
-                if step == 0:
+            for step, examples in enumerate(dataloader, 1):
+                if step == 1:
                     ex = examples[0]
                     logger.info(f"batch size: {len(examples)}")
                     logger.info(f"example source: {tokenizer.convert_ids_to_tokens(ex.source_ids)}")
@@ -174,7 +174,7 @@ def main(args):
                     decoder_attention_mask=target_mask,
                 )
 
-                if args.n_gpu > 1:
+                if args.gpu_per_node > 1:
                     loss = loss.mean()  # mean() to average on multi-gpu.
                 if args.gradient_accumulation_steps > 1:
                     loss = loss / args.gradient_accumulation_steps
@@ -190,7 +190,7 @@ def main(args):
                     optimizer.zero_grad()
                     scheduler.step()
                     global_step += 1
-                    if args.node_index == 0 and local_rank == 0 and global_step % args.log_steps == 0:
+                    if args.global_rank == 0 and global_step % args.log_steps == 0:
                         train_loss = round(
                             tr_loss
                             * args.gradient_accumulation_steps
@@ -204,14 +204,16 @@ def main(args):
                                 round(train_loss, 3),
                             )
                         )
-                    if global_step == args.train_steps:
-                        output_dir = os.path.join(args.output_dir, "checkpoints" + str(global_step))
-                        save_model(model, optimizer, scheduler, output_dir, config)
-                        logger.info(f"Reach max steps {args.train_steps}.")
-                        time.sleep(5)
-                        return
+                if global_step == args.train_steps:
+                    output_dir = os.path.join(args.output_dir, "checkpoints" + str(global_step))
+                    save_model(model, optimizer, scheduler, output_dir, config)
+                    logger.info(f"Reach max steps {args.train_steps}.")
+                    time.sleep(5)
+                    return
 
-                if args.node_index == 0 and local_rank == 0 and global_step % save_steps == 0:
+                if args.global_rank == 0 and \
+                        global_step % save_steps == 0:
+                        # global_step > 0 and global_step % save_steps == 0:
                     output_dir = os.path.join(args.output_dir, "checkpoints-" + str(global_step))
                     save_model(model, optimizer, scheduler, output_dir, config)
                     logger.info(
@@ -220,7 +222,7 @@ def main(args):
                         )
                     )
                     time.sleep(5)
-    if args.node_index == 0 and local_rank == 0:
+    if args.global_rank == 0:
         # Save the final checkpoint
         output_dir = os.path.join(args.output_dir, "checkpoints")
         save_model(model, optimizer, scheduler, output_dir, config)

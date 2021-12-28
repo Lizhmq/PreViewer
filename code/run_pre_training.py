@@ -7,7 +7,6 @@ import numpy as np
 from tqdm import tqdm
 import multiprocessing
 import time
-from utils import convert_examples_to_features
 from itertools import cycle
 from torch.utils.data import DataLoader, RandomSampler
 from torch.utils.data.distributed import DistributedSampler
@@ -28,16 +27,15 @@ logger = logging.getLogger(__name__)
 
 
 def get_loaders(data_list, args, tokenizer, pool):
-    def fn(examples):
-        feats = pool.map(convert_examples_to_features, [(example, tokenizer, args) for example in examples])
-        # feats = [convert_examples_to_features((example, tokenizer, args)) for example in examples]
-        return feats
+    def fn(features):
+        return features
     random.shuffle(data_list)       # this will shuffle data chunks
     for data_file in data_list:
+        logger.info(f"Start data file {data_file}.")
         dataset = TextDataset(tokenizer, pool, args, data_file)
         sampler = DistributedSampler(dataset)
-        # sampler = RandomSampler(dataset)
-        dataloader = DataLoader(dataset, sampler=sampler, batch_size=args.train_batch_size, collate_fn=fn)
+        dataloader = DataLoader(dataset, sampler=sampler, batch_size=args.train_batch_size, num_workers=args.cpu_count, collate_fn=fn)
+        logger.info(f"Finish data file {data_file}.")
         # dataloader = cycle(dataloader)
         yield dataset, sampler, dataloader
 
@@ -91,7 +89,7 @@ def main(args):
         args.log_steps = 5
         args.train_steps = 200
     else:
-        files = [file for file in os.listdir(args.train_path) if file.startswith("chunk")]
+        files = [file for file in os.listdir(args.train_path) if file.startswith("bchunk")]
         data_list = [os.path.join(args.train_path, file) for file in files]
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ["bias", "LayerNorm.weight"]
@@ -235,6 +233,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     args = add_args(parser)
     args.cpu_count = multiprocessing.cpu_count()
+    # remove long tokenization warning. ref: https://github.com/huggingface/transformers/issues/991
+    logging.getLogger("transformers.tokenization_utils_base").setLevel(logging.ERROR)
     logger.info(args)
     main(args)
     # torch.multiprocessing.spawn(main, args=(args,), nprocs=torch.cuda.device_count())

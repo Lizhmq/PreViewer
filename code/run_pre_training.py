@@ -38,7 +38,7 @@ def get_loaders(data_list, args, tokenizer, pool):
         sampler = DistributedSampler(dataset)
         # sampler = RandomSampler(dataset)
         dataloader = DataLoader(dataset, sampler=sampler, batch_size=args.train_batch_size, collate_fn=fn)
-        dataloader = cycle(dataloader)
+        # dataloader = cycle(dataloader)
         yield dataset, sampler, dataloader
 
 def save_model(model, optimizer, scheduler, output_dir, config):

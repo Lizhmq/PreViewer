@@ -20,7 +20,7 @@ def convert_examples_to_features(item):
     example, tokenizer, args = item
     # [1:-1] to remove <s> and </s>
     def encode_remove(tokenizer, text):
-        text = tokenizer.encode(text, max_length=args.max_source_length - 2)
+        text = tokenizer.encode(text, max_length=args.max_source_length - 2, truncation=True)
         if type(tokenizer) == T5Tokenizer:
             return text[:-1]
         elif type(tokenizer) == RobertaTokenizer:

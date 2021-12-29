@@ -253,7 +253,8 @@ class ReviewExample(object):
         self.lines = [self.remove_space(line) for line in self.lines]
         self.prevlines = [line for line in self.prevlines if len(line) > 0]
         self.afterlines = [line for line in self.afterlines if len(line) > 0]
-        self.lines, self.labels = list(
+        assert len(self.lines) == len(self.labels), "Not equal length in align."
+        topack = list(
             zip(
                 *[
                     (line, label)
@@ -262,6 +263,11 @@ class ReviewExample(object):
                 ]
             )
         )
+        if topack == []:
+            self.avail = False
+            return
+        else:
+            self.lines, self.labels = topack
         # tuple->list, convenient for later operation
         self.lines = list(self.lines)
         self.labels = list(self.labels)
@@ -273,7 +279,11 @@ def read_review_examples(filename, data_num):
     idx = 0
     with open(filename) as f:
         for line in f:
-            js = json.loads(line.strip())
+            try:
+                js = json.loads(line.strip())
+            except:
+                print("Error during reading json data.")
+                continue
             example = ReviewExample(
                         idx=idx,
                         oldf=js["oldf"],

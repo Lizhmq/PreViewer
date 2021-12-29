@@ -139,6 +139,10 @@ def main(args):
     save_steps = args.save_steps
 
     for epoch in range(1, args.train_epochs + 1):
+        save_seed = args.seed
+        args.seed += epoch
+        set_seed(args)
+        args.seed = save_seed
         data_tuples = get_loaders(data_list, args, tokenizer, pool)        # WARNING: this is a iterator, to save memory
         model.train()
         nb_tr_examples, nb_tr_steps, tr_loss = 0, 0, 0
@@ -204,7 +208,7 @@ def main(args):
                             )
                         )
                 if global_step == args.train_steps:
-                    output_dir = os.path.join(args.output_dir, "checkpoints" + str(global_step))
+                    output_dir = os.path.join(args.output_dir, "checkpoints-" + str(global_step))
                     save_model(model, optimizer, scheduler, output_dir, config)
                     logger.info(f"Reach max steps {args.train_steps}.")
                     time.sleep(5)
@@ -223,7 +227,7 @@ def main(args):
                     time.sleep(5)
     if args.global_rank == 0:
         # Save the final checkpoint
-        output_dir = os.path.join(args.output_dir, "checkpoints")
+        output_dir = os.path.join(args.output_dir, "checkpoints-last")
         save_model(model, optimizer, scheduler, output_dir, config)
         logger.info("Save the trained model and optimizer into {}".format(output_dir))
         time.sleep(5)

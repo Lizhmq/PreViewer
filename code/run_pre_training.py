@@ -30,14 +30,22 @@ def get_loaders(data_list, args, tokenizer, pool):
     def fn(features):
         return features
     random.shuffle(data_list)       # this will shuffle data chunks
-    for data_file in data_list:
-        logger.info(f"Start data file {data_file}.")
-        dataset = TextDataset(tokenizer, pool, args, data_file)
+    assert len(data_list) > 0, "Empty training data."
+    if "bchunk" in data_list[0]:
+        # concat_len = 1
+        data_list = [[elem] for elem in data_list]
+    else:
+        # default concat len: 10
+        concat_len = 10
+        data_list = [data_list[i: i + concat_len] for i in range(0, len(data_list), concat_len)]
+    for data_files in data_list:
+        logger.info(f"Start data files {data_files}.")
+        dataset = TextDataset(tokenizer, pool, args, data_files)
         sampler = DistributedSampler(dataset)
         dataloader = DataLoader(dataset, sampler=sampler, batch_size=args.train_batch_size, num_workers=args.cpu_count, collate_fn=fn)
-        logger.info(f"Finish data file {data_file}.")
-        # dataloader = cycle(dataloader)
+        logger.info(f"Finish data files {data_files}.")
         yield dataset, sampler, dataloader
+
 
 def save_model(model, optimizer, scheduler, output_dir, config):
     if not os.path.exists(output_dir):
@@ -89,7 +97,8 @@ def main(args):
         args.log_steps = 5
         args.train_steps = 200
     else:
-        files = [file for file in os.listdir(args.train_path) if file.startswith("bchunk")]
+        files = [file for file in os.listdir(args.train_path) if file.startswith("chunk") and file.endswith(".jsonl")]
+        files = sorted(files)
         data_list = [os.path.join(args.train_path, file) for file in files]
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ["bias", "LayerNorm.weight"]

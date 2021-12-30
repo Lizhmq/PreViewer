@@ -62,7 +62,7 @@ lens = np.array(list(map(cntline, fps)))
 fps = [open(file, "r") for file in files]
 
 outlist = []
-breakcnt = 50000
+breakcnt = 500000
 outidx = 0
 while True:
     idx = np.random.choice(range(len(lens)), 1, p=lens/np.sum(lens))[0]

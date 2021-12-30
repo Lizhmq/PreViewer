@@ -1,3 +1,4 @@
+import os
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
@@ -248,6 +249,7 @@ def build_or_load_gen_model(args):
     )
 
     if args.load_model_path is not None:
-        logger.info("Reload model from {}".format(args.load_model_path))
-        model.load_state_dict(torch.load(args.load_model_path))
+        model_path = os.path.join(args.load_model_path, "pytorch_model.bin")
+        logger.info("Reload model from {}".format(model_path))
+        model.load_state_dict(torch.load(model_path))
     return config, model, tokenizer

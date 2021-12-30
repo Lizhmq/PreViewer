@@ -43,26 +43,22 @@ class MyTokenizer(object):
 
 
 class TextDataset(Dataset):
-    def __init__(self, tokenizer, pool, args, file_paths):
-        self.examples = []
-        for file_path in file_paths:
-            savep = file_path.replace(".jsonl", ".exps")
-            # savep = "/home/v-zhuoli1/lzzz/processed/chunk_25.exps"
-            if os.path.exists(savep):
-                logger.info("Loading examples from {}".format(savep))
-                examples = torch.load(savep)
-            else:
-                logger.info("Reading examples from {}".format(file_path))
-                examples = read_review_examples(file_path, -1)
-                logger.info(f"Tokenize examples: {file_path}")
-                examples = pool.map(self.tokenize, \
-                    [(example, tokenizer, args) for example in examples])
-                torch.save(examples, savep)
-            self.examples.extend(examples)
-            del examples
+    def __init__(self, tokenizer, pool, args, file_path):
+        savep = file_path.replace(".jsonl", ".exps")
+        # savep = "/home/v-zhuoli1/lzzz/processed/chunk_25.exps"
+        if os.path.exists(savep):
+            logger.info("Loading examples from {}".format(savep))
+            examples = torch.load(savep)
+        else:
+            logger.info("Reading examples from {}".format(file_path))
+            examples = read_review_examples(file_path, -1)
+            logger.info(f"Tokenize examples: {file_path}")
+            examples = pool.map(self.tokenize, \
+                [(example, tokenizer, args) for example in examples])
+            torch.save(examples, savep)
         logger.info("Convert examples to features...")
         self.feats = pool.map(self.convert_examples_to_features, \
-            [(example, tokenizer, args) for example in self.examples])
+            [(example, tokenizer, args) for example in examples])
 
     def __len__(self):
         return len(self.feats)

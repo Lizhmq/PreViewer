@@ -9,6 +9,7 @@ import multiprocessing
 import time
 from itertools import cycle
 from torch.utils.data import DataLoader, RandomSampler
+from torch.utils.data import ConcatDataset
 from torch.utils.data.distributed import DistributedSampler
 from transformers import AdamW, get_linear_schedule_with_warmup
 from models import build_or_load_gen_model
@@ -36,11 +37,13 @@ def get_loaders(data_list, args, tokenizer, pool):
         data_list = [[elem] for elem in data_list]
     else:
         # default concat len: 10
-        concat_len = 10
+        concat_len = 5
         data_list = [data_list[i: i + concat_len] for i in range(0, len(data_list), concat_len)]
     for data_files in data_list:
         logger.info(f"Start data files {data_files}.")
-        dataset = TextDataset(tokenizer, pool, args, data_files)
+        # add concat dataset
+        datasets = [TextDataset(tokenizer, pool, args, data_file) for data_file in data_files]
+        dataset = ConcatDataset(datasets)
         sampler = DistributedSampler(dataset)
         dataloader = DataLoader(dataset, sampler=sampler, batch_size=args.train_batch_size, num_workers=args.cpu_count, collate_fn=fn)
         logger.info(f"Finish data files {data_files}.")

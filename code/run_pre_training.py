@@ -31,20 +31,23 @@ def get_loaders(data_list, args, tokenizer, pool):
     def fn(features):
         return features
     random.shuffle(data_list)       # this will shuffle data chunks
-    assert len(data_list) > 0, "Empty training data."
-    if "bchunk" in data_list[0]:
-        # concat_len = 1
-        data_list = [[elem] for elem in data_list]
-    else:
-        # default concat len: 10
-        concat_len = 5
-        data_list = [data_list[i: i + concat_len] for i in range(0, len(data_list), concat_len)]
-    for data_files in data_list:
+    global_rank = args.global_rank
+    world_size = args.world_size
+    assert len(data_list) > 0, "Empty datalist."
+    each_len = len(data_list) // world_size
+    curlist = data_list[global_rank * each_len : (global_rank + 1) * each_len]
+    # Warning: remainlist is dropped
+    # remainlist = data_list[each_len * world_size :]
+    concat_len = 5
+    split_list = [curlist[i:i + concat_len] for i in range(0, len(curlist), concat_len)]
+    # print(split_list)
+    for data_files in split_list:
         logger.info(f"Start data files {data_files}.")
         # add concat dataset
         datasets = [TextDataset(tokenizer, pool, args, data_file) for data_file in data_files]
         dataset = ConcatDataset(datasets)
-        sampler = DistributedSampler(dataset)
+        # sampler = DistributedSampler(dataset)
+        sampler = RandomSampler(dataset)
         dataloader = DataLoader(dataset, sampler=sampler, batch_size=args.train_batch_size, num_workers=args.cpu_count, collate_fn=fn)
         logger.info(f"Finish data files {data_files}.")
         yield dataset, sampler, dataloader
@@ -76,6 +79,7 @@ def main(args):
     local_rank = dist.get_rank() % args.gpu_per_node
     args.global_rank = local_rank + args.node_index * args.gpu_per_node
     args.local_rank = local_rank
+    args.world_size = dist.get_world_size()
     logger.warning("Process rank: %s, global rank: %s, world size: %s, bs: %s",
                    args.local_rank, args.global_rank, \
                    torch.distributed.get_world_size(), \

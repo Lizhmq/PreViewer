@@ -120,7 +120,7 @@ class TextDataset(Dataset):
                 input_labels.extend([-100] * len(line))
             if SPECIAL_ID < 99:     # only 0-99 ids in vocab
                 SPECIAL_ID += 1
-        if example.msg != "":
+        if len(example.msg) > 0:
             target_ids.append(tokenizer.msg_id)
             target_ids.extend(example.msg)
         assert len(input_labels) == len(source_ids), "Not equal length."

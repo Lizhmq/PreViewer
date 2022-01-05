@@ -30,14 +30,15 @@ logger = logging.getLogger(__name__)
 def get_loaders(data_list, args, tokenizer, pool):
     def fn(features):
         return features
-    random.shuffle(data_list)       # this will shuffle data chunks
     global_rank = args.global_rank
     world_size = args.world_size
     assert len(data_list) > 0, "Empty datalist."
     each_len = len(data_list) // world_size
-    curlist = data_list[global_rank * each_len : (global_rank + 1) * each_len]
-    # Warning: remainlist is dropped
+    # Warning: remainlist is dropped (yeah, we can use them for evaluation)
     # remainlist = data_list[each_len * world_size :]
+    data_list = data_list[: each_len * world_size]
+    random.shuffle(data_list)       # this will shuffle data chunks
+    curlist = data_list[global_rank * each_len : (global_rank + 1) * each_len]
     concat_len = 5
     split_list = [curlist[i:i + concat_len] for i in range(0, len(curlist), concat_len)]
     # print(split_list)
@@ -163,10 +164,7 @@ def main(args):
         data_tuples = get_loaders(data_list, args, tokenizer, pool)        # WARNING: this is a iterator, to save memory
         model.train()
         nb_tr_examples, nb_tr_steps, tr_loss = 0, 0, 0
-        chunknum = 0
         for _, _, dataloader in data_tuples:
-            logger.info(f"Start chunk {chunknum}")
-            chunknum += 1
             for step, examples in enumerate(dataloader, 1):
                 if step == 1:
                     ex = examples[0]
@@ -222,7 +220,7 @@ def main(args):
                                 round(train_loss, 3),
                             )
                         )
-                if global_step == args.train_steps:
+                if global_step == args.train_steps and args.global_rank == 0:
                     # end training
                     output_dir = os.path.join(args.output_dir, "checkpoints-last")
                     save_model(model, optimizer, scheduler, output_dir, config)
@@ -233,6 +231,7 @@ def main(args):
                 if args.global_rank == 0 and \
                         global_step % save_steps == 0:
                         # global_step > 0 and global_step % save_steps == 0:
+                    # eval_loss = eval(args, model)
                     output_dir = os.path.join(args.output_dir, "checkpoints-" + str(global_step))
                     save_model(model, optimizer, scheduler, output_dir, config)
                     logger.info(

@@ -86,7 +86,11 @@ class ReviewerModel(T5ForConditionalGeneration):
             decoder_input_ids = kwargs["decoder_input_ids"]
             attention_mask = kwargs["attention_mask"]
             decoder_attention_mask = kwargs["decoder_attention_mask"]
-            return self.review_forward(input_ids, input_labels, decoder_input_ids, attention_mask, decoder_attention_mask)
+            if "encoder_loss" not in kwargs:
+                encoder_loss = True
+            else:
+                encoder_loss = kwargs["encoder_loss"]
+            return self.review_forward(input_ids, input_labels, decoder_input_ids, attention_mask, decoder_attention_mask, encoder_loss)
         return super().forward(*argv, **kwargs)
 
     def review_forward(
@@ -96,6 +100,7 @@ class ReviewerModel(T5ForConditionalGeneration):
         decoder_input_ids,
         attention_mask,
         decoder_attention_mask,
+        encoder_loss=True
     ):
         encoder_outputs = self.encoder( \
             input_ids=input_ids,
@@ -117,12 +122,14 @@ class ReviewerModel(T5ForConditionalGeneration):
         sequence_output = decoder_outputs[0]
         if self.config.tie_word_embeddings: # this is True default
             sequence_output = sequence_output * (self.model_dim ** -0.5)
-        cls_logits = self.cls_head(hidden_states)
+        if encoder_loss:
+            cls_logits = self.cls_head(hidden_states)
         lm_logits = self.lm_head(sequence_output)
         if decoder_input_ids is not None and input_labels is not None:
             loss_fct = CrossEntropyLoss(ignore_index=-100)
             loss = loss_fct(lm_logits.view(-1, lm_logits.size(-1)), decoder_input_ids.view(-1))
-            loss += loss_fct(cls_logits.view(-1, cls_logits.size(-1)), input_labels.view(-1))
+            if encoder_loss:
+                loss += loss_fct(cls_logits.view(-1, cls_logits.size(-1)), input_labels.view(-1))
             return loss
         return cls_logits, lm_logits
 

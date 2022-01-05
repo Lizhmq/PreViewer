@@ -1,5 +1,6 @@
 import os, json
 import random
+import math
 import numpy as np
 
 
@@ -52,40 +53,49 @@ def cntline(fp):
 
 
 dirname = "../../../lzzz/processed"
-outfile = "chunk_"
+outfile = "genchunk_train"
 # files = ["ruby_cls.jsonl", "ruby_gen.jsonl"]
 files = os.listdir(dirname)
-langs = [file[:4] for file in files]
-files = [os.path.join(dirname, file) for file in files if file.endswith(".jsonl")]
+# langs = [file[:4] for file in files]
+files.remove("chunk_8.jsonl")
+files.remove("chunk_9.jsonl")
+files = [os.path.join(dirname, file) for file in files if file.startswith("chunk") and file.endswith(".jsonl")]
 fps = [open(file, "r") for file in files]
 lens = np.array(list(map(cntline, fps)))
 fps = [open(file, "r") for file in files]
 
+# totl = sum(lens)
+totl = 815493 #magic number
+gpus = 8
+breakcnt = math.ceil(totl / gpus)
+
 outlist = []
-breakcnt = 500000
 outidx = 0
 while True:
     idx = np.random.choice(range(len(lens)), 1, p=lens/np.sum(lens))[0]
     lens[idx] -= 1
-    if sum(lens) == 0:
+    if sum(lens) == 0:      # this seems drop the last sample
         break
-    fp, lang = fps[idx], langs[idx]
+    # fp, lang = fps[idx], langs[idx]
+    fp = fps[idx]
     try:
         line = next(fp)
-        line = line.encode("ascii", "ignore").decode()
+        # line = line.encode("ascii", "ignore").decode()
         dic = json.loads(line)
+        if "msg" not in dic or len(dic["msg"]) == 0:
+            continue
     except:
         print("JSON decoding error.")
         continue
-    dic = regurize(dic)
-    if dic == {}:
-        continue
-    dic["lang"] = lang
+    # dic = regurize(dic)
+    # if dic == {}:
+    #     continue
+    # dic["lang"] = lang
     outlist.append(json.dumps(dic))
     # print(len(outlist))
     if len(outlist) == breakcnt:
         with open(os.path.join(dirname, outfile + str(outidx) + ".jsonl"), "w") as fp:
-            fp.write("\n".join(outlist))
+            fp.write("\n".join(outlist) + "\n")
         outlist = []
         outidx += 1
         print(f"{outidx} files written.")

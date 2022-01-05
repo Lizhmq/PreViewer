@@ -80,6 +80,12 @@ def add_args(parser):
         help="The test filename. Should contain the .jsonl files for this task.",
     )
     parser.add_argument(
+        "--gold_filename",
+        default=None,
+        type=str,
+        help="The gold filename. Should contain the .jsonl files for this task.",
+    )
+    parser.add_argument(
         "--config_name",
         default="Salesforce/codet5-base",
         type=str,

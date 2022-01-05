@@ -53,7 +53,13 @@ def add_args(parser):
         "--train_path",
         default=None,
         type=str,
-        help="The train files path. Should contain the .jsonl files for this task.",
+        help="The pretrain files path. Should contain the .jsonl files for this task.",
+    )
+    parser.add_argument(
+        "--eval_chunkname",
+        default=None,
+        type=str,
+        help="The eval file name.",
     )
     parser.add_argument(
         "--train_filename",
@@ -156,6 +162,7 @@ def add_args(parser):
         "--log_steps", default=-1, type=int,
     )
     parser.add_argument("--eval_steps", default=-1, type=int, help="")
+    parser.add_argument("--eval_file", default="", type=str)
     parser.add_argument("--train_steps", default=-1, type=int, help="")
     parser.add_argument(
         "--warmup_steps", default=100, type=int, help="Linear warmup over warmup_steps."

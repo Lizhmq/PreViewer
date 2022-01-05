@@ -71,7 +71,9 @@ while True:
         break
     fp, lang = fps[idx], langs[idx]
     try:
-        dic = json.loads(next(fp))
+        line = next(fp)
+        line = line.encode("ascii", "ignore").decode()
+        dic = json.loads(line)
     except:
         print("JSON decoding error.")
         continue

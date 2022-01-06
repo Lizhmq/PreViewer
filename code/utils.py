@@ -43,7 +43,7 @@ class MyTokenizer(object):
 
 
 class TextDataset(Dataset):
-    def __init__(self, tokenizer, pool, args, file_path):
+    def __init__(self, tokenizer, pool, args, file_path, samplenum=-1):
         savep = file_path.replace(".jsonl", ".exps")
         # savep = "/home/v-zhuoli1/lzzz/processed/chunk_25.exps"
         if os.path.exists(savep):
@@ -51,7 +51,7 @@ class TextDataset(Dataset):
             examples = torch.load(savep)
         else:
             logger.info("Reading examples from {}".format(file_path))
-            examples = read_review_examples(file_path, -1)
+            examples = read_review_examples(file_path, samplenum)
             logger.info(f"Tokenize examples: {file_path}")
             examples = pool.map(self.tokenize, \
                 [(example, tokenizer, args) for example in examples])
@@ -120,9 +120,9 @@ class TextDataset(Dataset):
                 input_labels.extend([-100] * len(line))
             if SPECIAL_ID < 99:     # only 0-99 ids in vocab
                 SPECIAL_ID += 1
-        if len(example.msg) > 0:
-            target_ids.append(tokenizer.msg_id)
-            target_ids.extend(example.msg)
+        # if len(example.msg) > 0:
+        target_ids.append(tokenizer.msg_id)
+        target_ids.extend(example.msg)
         assert len(input_labels) == len(source_ids), "Not equal length."
         assert len(input_labels) <= args.max_source_length - 2, f"Too long inputs: {len(input_labels)}."
         input_labels = [-100] + input_labels + [-100]
@@ -149,6 +149,74 @@ class TextDataset(Dataset):
             return text
         else:
             raise NotImplementedError
+
+
+class CommentGenDataset(TextDataset):
+    def __init__(self, tokenizer, pool, args, file_path, samplenum=-1):
+        savep = file_path.replace(".jsonl", ".exps")
+        if os.path.exists(savep):
+            logger.info("Loading examples from {}".format(savep))
+            examples = torch.load(savep)
+        else:
+            logger.info("Reading examples from {}".format(file_path))
+            examples = read_review_examples(file_path, samplenum)
+            logger.info(f"Tokenize examples: {file_path}")
+            examples = pool.map(self.tokenize, \
+                [(example, tokenizer, args) for example in examples])
+            torch.save(examples, savep)
+        logger.info("Convert examples to features...")
+        self.feats = pool.map(self.convert_examples_to_features, \
+            [(example, tokenizer, args) for example in examples])
+        self.feats = [feat for feat in self.feats if feat is not None]
+    
+    def convert_examples_to_features(self, item):
+        """
+        Mask and padding.
+        """
+        example, tokenizer, args = item
+        lines = example.lines
+        labels = example.labels
+
+        if len(example.msg) == 0:
+            return None
+
+        source_ids, input_labels, target_ids = [], [], []
+        SPECIAL_ID = 0
+        ADD_ID = tokenizer.encode("+")[0]
+        SUB_ID = tokenizer.encode("-")[0]
+        for i, (line, label) in enumerate(zip(lines, labels)):
+            source_ids.append(tokenizer.special_dict[f"<e{SPECIAL_ID}>"])
+            input_labels.append(label)
+            if label == 1:
+                source_ids.append(ADD_ID)
+                input_labels.append(-100)
+            elif label == 0:
+                source_ids.append(SUB_ID)
+                input_labels.append(-100)
+            source_ids.extend(line)
+            input_labels.extend([-100] * len(line))
+            if SPECIAL_ID < 99:     # only 0-99 ids in vocab
+                SPECIAL_ID += 1
+        assert len(example.msg) > 0, "Empty message."
+        target_ids.append(tokenizer.msg_id)
+        target_ids.extend(example.msg)
+        assert len(input_labels) == len(source_ids), "Not equal length."
+        # assert len(input_labels) <= args.max_source_length - 2, f"Too long inputs: {len(input_labels)}."
+        input_labels = [-100] + input_labels[:args.max_source_length - 2] + [-100]
+        source_ids = [tokenizer.bos_id] + source_ids[:args.max_source_length - 2] + [tokenizer.eos_id]
+        pad_len = args.max_source_length - len(source_ids)
+        source_ids += [tokenizer.pad_id] * pad_len
+        input_labels += [-100] * pad_len
+        target_ids = target_ids[:args.max_target_length - 2]
+        target_ids = [tokenizer.bos_id] + target_ids + [tokenizer.eos_id]
+        pad_len = args.max_target_length - len(target_ids)
+        target_ids += [tokenizer.pad_id] * pad_len
+        assert len(source_ids) == args.max_source_length, "Not equal length."
+        assert len(input_labels) == args.max_source_length, "Not equal length."
+        assert len(target_ids) == args.max_target_length, "Not equal length."
+        return ReviewFeatures(example.idx, source_ids, input_labels, target_ids)
+
+
 
 
 class InputFeatures(object):
@@ -332,8 +400,9 @@ def read_review_examples(filename, data_num=-1):
                 if idx == data_num:
                     break
             else:
-                # print("Passing invalid diff.")
-                # about 1/10000, let's do not print
-                pass
+                # print(f"Passing {idx} because of invalid diff.")
+                idx += 1 
+                if idx == data_num:
+                    break
                 
     return examples

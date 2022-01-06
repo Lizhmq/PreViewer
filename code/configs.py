@@ -24,6 +24,7 @@ def add_args(parser):
     )
     parser.add_argument("--add_lang_ids", action="store_true")
     parser.add_argument("--from_scratch", action="store_true")
+    parser.add_argument("--no_cls_head", action="store_true")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--start_epoch", default=0, type=int)
     parser.add_argument("--train_epochs", default=10, type=int)

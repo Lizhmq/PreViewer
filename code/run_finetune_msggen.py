@@ -229,10 +229,9 @@ def main(args):
                     logger.info(f"Reach max steps {args.train_steps}.")
                     time.sleep(5)
                     return
-
                 if args.global_rank == 0 and \
-                        global_step % save_steps == 0:
-                        # global_step > 0 and global_step % save_steps == 0:
+                        global_step % save_steps == 0 and \
+                        nb_tr_steps % args.gradient_accumulation_steps == 0:
                     # eval_loss = eval(args, model)
                     output_dir = os.path.join(args.output_dir, "checkpoints-" + str(global_step))
                     save_model(model, optimizer, scheduler, output_dir, config)

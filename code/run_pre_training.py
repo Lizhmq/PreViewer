@@ -166,12 +166,14 @@ def main(args):
         nb_tr_examples, nb_tr_steps, tr_loss = 0, 0, 0
         for _, _, dataloader in data_tuples:
             for step, examples in enumerate(dataloader, 1):
-                if step == 1:
-                    ex = examples[0]
-                    logger.info(f"batch size: {len(examples)}")
-                    logger.info(f"example source: {tokenizer.convert_ids_to_tokens(ex.source_ids)}")
-                    # logger.info(f"example label: {tokenizer.convert_ids_to_tokens(ex.source_labels)}")
-                    logger.info(f"example target: {tokenizer.convert_ids_to_tokens(ex.target_ids)}")
+                if step <= 3:
+                    for ex in examples:
+                        # if ex.type == "label":
+                        logger.info(f"example type: {ex.type}")
+                        logger.info(f"batch size: {len(examples)}")
+                        logger.info(f"example source: {tokenizer.convert_ids_to_tokens(ex.source_ids)}")
+                        logger.info(f"example label: {ex.source_labels}")
+                        logger.info(f"example target: {tokenizer.convert_ids_to_tokens(ex.target_ids)}")
                 source_ids = torch.tensor(
                     [ex.source_ids for ex in examples], dtype=torch.long
                 ).to(local_rank)

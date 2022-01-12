@@ -126,10 +126,11 @@ class ReviewerModel(T5ForConditionalGeneration):
             cls_logits = self.cls_head(hidden_states)
         lm_logits = self.lm_head(sequence_output)
         if decoder_input_ids is not None and input_labels is not None:
-            loss_fct = CrossEntropyLoss(ignore_index=-100)
-            loss = loss_fct(lm_logits.view(-1, lm_logits.size(-1)), decoder_input_ids.view(-1))
+            lm_loss_fct = CrossEntropyLoss(ignore_index=0)      # Warning: PAD_ID should be 0
+            cls_loss_fct = CrossEntropyLoss(ignore_index=-100)
+            loss = lm_loss_fct(lm_logits.view(-1, lm_logits.size(-1)), decoder_input_ids.view(-1))
             if encoder_loss:
-                loss += loss_fct(cls_logits.view(-1, cls_logits.size(-1)), input_labels.view(-1))
+                loss += cls_loss_fct(cls_logits.view(-1, cls_logits.size(-1)), input_labels.view(-1))
             return loss
         return cls_logits, lm_logits
 
@@ -153,7 +154,7 @@ def load_model(
         tokenizer_path = "Salesforce/codet5-base"
     tokenizer = tokenizer_class.from_pretrained(tokenizer_path)
     
-    adds = ["<pad>", "<s>", "</s>", "<unk>", "<mask>"]
+    adds = ["<pad>", "<s>", "</s>", "<unk>", "<mask>", "<keep>", "<add>", "<del>"]
     adds = [tok for tok in adds if tok not in tokenizer.get_vocab()]
     if adds:
         tokenizer.add_special_tokens(
@@ -201,6 +202,10 @@ def load_model(
     config.pad_token_id = tokenizer.get_vocab()["<pad>"]
     config.eos_token_id = tokenizer.get_vocab()["</s>"]
     config.mask_token_id = tokenizer.get_vocab()["<mask>"]
+    config.keep_token_id = tokenizer.get_vocab()["<keep>"]
+    config.add_token_id = tokenizer.get_vocab()["<add>"]
+    config.del_token_id = tokenizer.get_vocab()["<del>"]
+
     config.lang_tokens = langs
     model.config = config  # changing the default config of T5
     model.resize_token_embeddings(len(tokenizer))
@@ -213,6 +218,10 @@ def load_model(
     tokenizer.pad_id = tokenizer.get_vocab()["<pad>"]
     tokenizer.eos_id = tokenizer.get_vocab()["</s>"]
     tokenizer.msg_id = tokenizer.get_vocab()["<msg>"]
+    tokenizer.keep_id = tokenizer.get_vocab()["<keep>"]
+    tokenizer.add_id = tokenizer.get_vocab()["<add>"]
+    tokenizer.del_id = tokenizer.get_vocab()["<del>"]
+    
 
     if from_scratch:
         model = ReviewerModel(config)

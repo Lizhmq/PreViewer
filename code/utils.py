@@ -40,10 +40,13 @@ class MyTokenizer(object):
     def encode(self, text, **kwargs):
         return self.tokenizer.encode(text).ids
 
+    def get_vocab(self):
+        return self.tokenizer.get_vocab()
 
 
 class TextDataset(Dataset):
     def __init__(self, tokenizer, pool, args, file_path, samplenum=-1):
+        self.cnt = 0
         savep = file_path.replace(".jsonl", ".exps")
         # savep = "/home/v-zhuoli1/lzzz/processed/chunk_25.exps"
         if os.path.exists(savep):
@@ -97,47 +100,99 @@ class TextDataset(Dataset):
         return example
 
     def convert_examples_to_features(self, item):
-        """
-        Mask and padding.
-        """
+        example, _, _ = item
+        if len(example.msg) > 0:
+            return self.msg_example(item)
+        if sum(example.labels) == len(example.labels) * -100:   # there is no changes (empty lines are filtered)
+            self.cnt += 1
+            # if self.cnt % 100 == 0:
+            #     print(self.cnt)
+            return self.decoder_example(item)
+        if random.random() < 0.5:
+            return self.encoder_example(item)
+        return self.decoder_example(item)
+
+    def encoder_example(self, item):
         example, tokenizer, args = item
         lines = example.lines
         labels = example.labels
 
-        source_ids, input_labels, target_ids = [], [], []
-        SPECIAL_ID = 0
-        mask_idxs = random.choices(range(len(lines)), k=int(len(lines) * args.mask_rate))
+        target_ids = [tokenizer.pad_id] * args.max_target_length
+        source_ids, input_labels = [], []
         for i, (line, label) in enumerate(zip(lines, labels)):
-            source_ids.append(tokenizer.special_dict[f"<e{SPECIAL_ID}>"])
-            input_labels.append(label)
-            if i in mask_idxs:
+            if label != -100:       # only insert special tokens at diffs, not context
                 source_ids.append(tokenizer.mask_id)
-                input_labels.append(-100)
-                target_ids.append(tokenizer.special_dict[f"<e{SPECIAL_ID}>"])
-                target_ids.extend(line)
-            else:
-                source_ids.extend(line)
-                input_labels.extend([-100] * len(line))
-            if SPECIAL_ID < 99:     # only 0-99 ids in vocab
-                SPECIAL_ID += 1
-        # if len(example.msg) > 0:
-        target_ids.append(tokenizer.msg_id)
-        target_ids.extend(example.msg)
+                input_labels.append(label)
+            source_ids.extend(line)
+            input_labels.extend([-100] * len(line))
         assert len(input_labels) == len(source_ids), "Not equal length."
         assert len(input_labels) <= args.max_source_length - 2, f"Too long inputs: {len(input_labels)}."
-        input_labels = [-100] + input_labels + [-100]
         source_ids = [tokenizer.bos_id] + source_ids + [tokenizer.eos_id]
+        input_labels = [-100] + input_labels + [-100]
         pad_len = args.max_source_length - len(source_ids)
         source_ids += [tokenizer.pad_id] * pad_len
         input_labels += [-100] * pad_len
+        assert len(source_ids) == args.max_source_length, "Not equal length."
+        assert len(input_labels) == args.max_source_length, "Not equal length."
+        return ReviewFeatures(example.idx, source_ids, input_labels, target_ids, type="label")
+
+    def decoder_example(self, item):
+        example, tokenizer, args = item
+        lines = example.lines
+        labels = example.labels
+
+        input_labels = [-100] * args.max_source_length
+        source_ids, target_ids = [], []
+        SPECIAL_ID = 0
+        mask_idxs = random.choices(range(len(lines)), k=int(len(lines) * args.mask_rate))
+        id_dict = {0: tokenizer.del_id, 1: tokenizer.add_id, 2: tokenizer.keep_id}
+        for i, (line, label) in enumerate(zip(lines, labels)):
+            if label in id_dict:
+                source_ids.append(id_dict[label])
+            if i in mask_idxs:
+                source_ids.append(tokenizer.special_dict[f"<e{SPECIAL_ID}>"])
+                target_ids.append(tokenizer.special_dict[f"<e{SPECIAL_ID}>"])
+                target_ids.extend(line)
+                if SPECIAL_ID < 99:     # only 0-99 ids in vocab
+                    SPECIAL_ID += 1
+            else:
+                source_ids.extend(line)
+        source_ids = source_ids[:args.max_source_length - 2]
+        source_ids = [tokenizer.bos_id] + source_ids + [tokenizer.eos_id]
+        pad_len = args.max_source_length - len(source_ids)
+        source_ids += [tokenizer.pad_id] * pad_len
         target_ids = target_ids[:args.max_target_length - 2]
         target_ids = [tokenizer.bos_id] + target_ids + [tokenizer.eos_id]
         pad_len = args.max_target_length - len(target_ids)
         target_ids += [tokenizer.pad_id] * pad_len
         assert len(source_ids) == args.max_source_length, "Not equal length."
-        assert len(input_labels) == args.max_source_length, "Not equal length."
         assert len(target_ids) == args.max_target_length, "Not equal length."
-        return ReviewFeatures(example.idx, source_ids, input_labels, target_ids)
+        return ReviewFeatures(example.idx, source_ids, input_labels, target_ids, type="line")
+
+    def msg_example(self, item):
+        example, tokenizer, args = item
+        lines = example.lines
+        labels = example.labels
+        input_labels = [-100] * args.max_source_length
+        source_ids, target_ids = [], []
+        id_dict = {0: tokenizer.del_id, 1: tokenizer.add_id, 2: tokenizer.keep_id}
+        for i, (line, label) in enumerate(zip(lines, labels)):
+            if label != -100:
+                source_ids.append(id_dict[label])
+            source_ids.extend(line)
+        target_ids.append(tokenizer.msg_id)
+        target_ids.extend(example.msg)
+        assert len(source_ids) <= args.max_source_length - 2, f"Too long inputs: {len(source_ids)}."
+        source_ids = [tokenizer.bos_id] + source_ids + [tokenizer.eos_id]
+        pad_len = args.max_source_length - len(source_ids)
+        source_ids += [tokenizer.pad_id] * pad_len
+        target_ids = target_ids[:args.max_target_length - 2]
+        target_ids = [tokenizer.bos_id] + target_ids + [tokenizer.eos_id]
+        pad_len = args.max_target_length - len(target_ids)
+        target_ids += [tokenizer.pad_id] * pad_len
+        assert len(source_ids) == args.max_source_length, "Not equal length."
+        assert len(target_ids) == args.max_target_length, "Not equal length."
+        return ReviewFeatures(example.idx, source_ids, input_labels, target_ids, type="msg")
 
     def encode_remove(self, tokenizer, text, args):
         text = tokenizer.encode(text, max_length=args.max_source_length - 2, truncation=True)
@@ -230,12 +285,13 @@ class InputFeatures(object):
 
 
 class ReviewFeatures(object):
-    def __init__(self, example_id, source_ids, source_labels, target_ids):
+    def __init__(self, example_id, source_ids, source_labels, target_ids, type):
         self.example_id = example_id
         self.source_ids = source_ids
         self.source_labels = source_labels
         self.target_ids = target_ids
-
+        assert type in ("label", "line", "msg")
+        self.type = type
 
 class ReviewExample(object):
     """A single training/test example."""

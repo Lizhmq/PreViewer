@@ -154,7 +154,8 @@ def load_model(
         tokenizer_path = "Salesforce/codet5-base"
     tokenizer = tokenizer_class.from_pretrained(tokenizer_path)
     
-    adds = ["<pad>", "<s>", "</s>", "<unk>", "<mask>", "<keep>", "<add>", "<del>"]
+    adds = ["<pad>", "<s>", "</s>", "<unk>", "<mask>", "<keep>", "<add>", "<del>", "<start>", "<end>"]
+    # adds = ["<pad>", "<s>", "</s>", "<unk>", "<mask>"]
     adds = [tok for tok in adds if tok not in tokenizer.get_vocab()]
     if adds:
         tokenizer.add_special_tokens(
@@ -205,7 +206,9 @@ def load_model(
     config.keep_token_id = tokenizer.get_vocab()["<keep>"]
     config.add_token_id = tokenizer.get_vocab()["<add>"]
     config.del_token_id = tokenizer.get_vocab()["<del>"]
-
+    config.start_token_id = tokenizer.get_vocab()["<start>"]
+    config.end_token_id = tokenizer.get_vocab()["<end>"]
+    
     config.lang_tokens = langs
     model.config = config  # changing the default config of T5
     model.resize_token_embeddings(len(tokenizer))
@@ -221,6 +224,8 @@ def load_model(
     tokenizer.keep_id = tokenizer.get_vocab()["<keep>"]
     tokenizer.add_id = tokenizer.get_vocab()["<add>"]
     tokenizer.del_id = tokenizer.get_vocab()["<del>"]
+    tokenizer.start_id = tokenizer.get_vocab()["<start>"]
+    tokenizer.end_id = tokenizer.get_vocab()["<end>"]
     
 
     if from_scratch:

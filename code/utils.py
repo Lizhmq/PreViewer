@@ -60,14 +60,33 @@ class TextDataset(Dataset):
                 [(example, tokenizer, args) for example in examples])
             torch.save(examples, savep)
         logger.info("Convert examples to features...")
-        self.feats = pool.map(self.convert_examples_to_features, \
+        self.set_start_end_ids(examples)
+        self.featss = pool.map(self.convert_examples_to_features, \
             [(example, tokenizer, args) for example in examples])
+        self.feats = [feat for feats in self.featss for feat in feats]  # expand the lists
 
     def __len__(self):
         return len(self.feats)
 
     def __getitem__(self, i):
         return self.feats[i]
+
+    def set_start_end_ids(self, examples):
+        for example in examples:
+            labels = example.labels
+            start_id = 0
+            end_id = len(labels) - 1
+            for i, label in enumerate(labels):
+                if label != -100:               # find the first label
+                    start_id = i
+                    break
+            for i in range(len(labels) - 1, -1, -1):
+                label = labels[i]
+                if label != -100:
+                    end_id = i
+                    break
+            example.start_id = start_id
+            example.end_id = end_id
 
     def tokenize(self, item):
         example, tokenizer, args = item
@@ -102,31 +121,41 @@ class TextDataset(Dataset):
     def convert_examples_to_features(self, item):
         example, _, _ = item
         if len(example.msg) > 0:
-            return self.msg_example(item)
-        if sum(example.labels) == len(example.labels) * -100:   # there is no changes (empty lines are filtered)
-            self.cnt += 1
-            # if self.cnt % 100 == 0:
-            #     print(self.cnt)
-            return self.decoder_example(item)
+            exs = []
+            for _ in range(2):  # up sampling
+                if random.random() < 5 / 6:
+                    exs.append(self.msg_example(item))
+                elif random.random() < 0.5:
+                    exs.append(self.encoder_example(item))
+                else:
+                    exs.append(self.decoder_example(item))
+            return exs
         if random.random() < 0.5:
-            return self.encoder_example(item)
-        return self.decoder_example(item)
+            return [self.encoder_example(item)]
+        return [self.decoder_example(item)]
 
     def encoder_example(self, item):
         example, tokenizer, args = item
         lines = example.lines
         labels = example.labels
-
         target_ids = [tokenizer.pad_id] * args.max_target_length
         source_ids, input_labels = [], []
         for i, (line, label) in enumerate(zip(lines, labels)):
+            if i == example.start_id:
+                source_ids.append(tokenizer.start_id)
+                input_labels.append(-100)
             if label != -100:       # only insert special tokens at diffs, not context
                 source_ids.append(tokenizer.mask_id)
                 input_labels.append(label)
             source_ids.extend(line)
             input_labels.extend([-100] * len(line))
+            if i == example.end_id:
+                source_ids.append(tokenizer.end_id)
+                input_labels.append(-100)
         assert len(input_labels) == len(source_ids), "Not equal length."
-        assert len(input_labels) <= args.max_source_length - 2, f"Too long inputs: {len(input_labels)}."
+        assert len(input_labels) <= args.max_source_length, f"Too long inputs: {len(input_labels)}."
+        source_ids = source_ids[:args.max_source_length - 2]
+        input_labels = input_labels[:args.max_source_length - 2]
         source_ids = [tokenizer.bos_id] + source_ids + [tokenizer.eos_id]
         input_labels = [-100] + input_labels + [-100]
         pad_len = args.max_source_length - len(source_ids)
@@ -147,6 +176,8 @@ class TextDataset(Dataset):
         mask_idxs = random.choices(range(len(lines)), k=int(len(lines) * args.mask_rate))
         id_dict = {0: tokenizer.del_id, 1: tokenizer.add_id, 2: tokenizer.keep_id}
         for i, (line, label) in enumerate(zip(lines, labels)):
+            if i == example.start_id:
+                source_ids.append(tokenizer.start_id)
             if label in id_dict:
                 source_ids.append(id_dict[label])
             if i in mask_idxs:
@@ -157,6 +188,8 @@ class TextDataset(Dataset):
                     SPECIAL_ID += 1
             else:
                 source_ids.extend(line)
+            if i == example.end_id:
+                source_ids.append(tokenizer.end_id)
         source_ids = source_ids[:args.max_source_length - 2]
         source_ids = [tokenizer.bos_id] + source_ids + [tokenizer.eos_id]
         pad_len = args.max_source_length - len(source_ids)
@@ -177,12 +210,17 @@ class TextDataset(Dataset):
         source_ids, target_ids = [], []
         id_dict = {0: tokenizer.del_id, 1: tokenizer.add_id, 2: tokenizer.keep_id}
         for i, (line, label) in enumerate(zip(lines, labels)):
+            if i == example.start_id:
+                source_ids.append(tokenizer.start_id)
             if label != -100:
                 source_ids.append(id_dict[label])
             source_ids.extend(line)
+            if i == example.end_id:
+                source_ids.append(tokenizer.end_id)
         target_ids.append(tokenizer.msg_id)
         target_ids.extend(example.msg)
-        assert len(source_ids) <= args.max_source_length - 2, f"Too long inputs: {len(source_ids)}."
+        assert len(source_ids) <= args.max_source_length, f"Too long inputs: {len(source_ids)}."
+        source_ids = source_ids[:args.max_source_length - 2]
         source_ids = [tokenizer.bos_id] + source_ids + [tokenizer.eos_id]
         pad_len = args.max_source_length - len(source_ids)
         source_ids += [tokenizer.pad_id] * pad_len
@@ -195,7 +233,7 @@ class TextDataset(Dataset):
         return ReviewFeatures(example.idx, source_ids, input_labels, target_ids, type="msg")
 
     def encode_remove(self, tokenizer, text, args):
-        text = tokenizer.encode(text, max_length=args.max_source_length - 2, truncation=True)
+        text = tokenizer.encode(text, max_length=args.max_source_length, truncation=True)
         if type(tokenizer) == T5Tokenizer:
             return text[:-1]
         elif type(tokenizer) == RobertaTokenizer:
@@ -269,7 +307,7 @@ class CommentGenDataset(TextDataset):
         assert len(source_ids) == args.max_source_length, "Not equal length."
         assert len(input_labels) == args.max_source_length, "Not equal length."
         assert len(target_ids) == args.max_target_length, "Not equal length."
-        return ReviewFeatures(example.idx, source_ids, input_labels, target_ids)
+        return ReviewFeatures(example.idx, source_ids, input_labels, target_ids, type="msg")
 
 
 
@@ -318,11 +356,12 @@ class ReviewExample(object):
             return
         # Warning: lines is not self.lines
         # lines for rough length estimation
+        # 128 is a estimation for T5Tokenizer
         lines = [source_str.split() for source_str in self.lines]
         inputl = len(lines) # line tag
         inputl += sum(map(len, lines))
         left, right = 0, len(lines)
-        while inputl > 512 - 2:
+        while inputl > 128 - 2:
             if left % 2 == 0:
                 inputl -= len(lines[left]) + 1
                 left += 1
@@ -336,25 +375,25 @@ class ReviewExample(object):
         afterlines = self.afterlines
         prev_after_len = max(len(prevlines), len(afterlines))
         i = 0
-        while inputl < 512 - 2 and i < prev_after_len:
+        while inputl < 128 - 2 and i < prev_after_len:
             if i < len(prevlines):
                 newl = inputl + len(prevlines[-1-i].split()) + 1
-                if newl > 512 - 2:
+                if newl > 128 - 2:
                     break
                 self.lines.insert(0, prevlines[-1-i])
                 self.labels.insert(0, -100)
                 inputl = newl  # tag
             if i < len(afterlines):
                 newl = inputl + len(afterlines[i].split()) + 1
-                if newl > 512 - 2:
+                if newl > 128 - 2:
                     break
                 self.lines.append(afterlines[i])
                 self.labels.append(-100)
                 inputl = newl    # tag
             i += 1
-        assert inputl <= 512 - 2, "Too long inputs."
+        assert inputl <= 128 - 2, "Too long inputs."
         assert len(self.lines) == len(self.labels), "Not equal length."
-        # self.lines is about 512 now, let's tokenize it
+        # self.lines is about 128 now, let's tokenize it
         self.input = "<e0>".join(self.lines)
         self.prevlines, self.lines, self.afterlines = [], [], []
 

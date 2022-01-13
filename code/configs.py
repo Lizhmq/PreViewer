@@ -20,7 +20,7 @@ def add_args(parser):
         "--model_type",
         default="t5",
         type=str,
-        choices=["roberta", "t5", "bart", "codet5"],
+        choices=["roberta", "t5", "bart", "codet5", "scratch"],
     )
     parser.add_argument("--add_lang_ids", action="store_true")
     parser.add_argument("--from_scratch", action="store_true")

@@ -22,6 +22,7 @@ class MyTokenizer(object):
     """
     def __init__(self, vocab=None, merges=None, **kwargs):
         self.tokenizer = ByteLevelBPETokenizer(vocab, merges, **kwargs)
+        self.update_id2token()
 
     @staticmethod
     def from_pretrained(path):
@@ -30,31 +31,47 @@ class MyTokenizer(object):
         mytoken = MyTokenizer(vocabp, mergesp)
         return mytoken
 
+    def update_id2token(self):
+        vocab = self.tokenizer.get_vocab()
+        self.id2token = {vocab[token]: token for token in vocab}
+
     def add_special_tokens(self, dic):
-        self.tokenizer.add_special_tokens(dic.values())
+        for values in dic.values():
+            self.tokenizer.add_special_tokens(values)
+        self.update_id2token()
 
     def convert_ids_to_tokens(self, ids):
-        vocab = self.tokenizer.get_vocab()
+        vocab = self.id2token
         return [vocab[i] for i in ids]
 
     def encode(self, text, **kwargs):
+        text = text.encode("ascii", errors="ignore").decode("ascii")
         return self.tokenizer.encode(text).ids
 
     def get_vocab(self):
         return self.tokenizer.get_vocab()
 
+    def __len__(self):
+        return len(self.tokenizer.get_vocab())
+
 
 class TextDataset(Dataset):
     def __init__(self, tokenizer, pool, args, file_path, samplenum=-1):
         self.cnt = 0
-        savep = file_path.replace(".jsonl", ".exps")
+        if isinstance(tokenizer, MyTokenizer):
+            tokenizer_type = "mytok"
+        elif isinstance(tokenizer, T5Tokenizer):
+            tokenizer_type = ""
+        else:
+            tokenizer_type = "unk"
+        savep = file_path.replace(".jsonl", tokenizer_type + ".exps")
         # savep = "/home/v-zhuoli1/lzzz/processed/chunk_25.exps"
         if os.path.exists(savep):
             logger.info("Loading examples from {}".format(savep))
             examples = torch.load(savep)
         else:
             logger.info("Reading examples from {}".format(file_path))
-            examples = read_review_examples(file_path, samplenum)
+            examples = read_review_examples(file_path, samplenum, tokenizer)
             logger.info(f"Tokenize examples: {file_path}")
             examples = pool.map(self.tokenize, \
                 [(example, tokenizer, args) for example in examples])
@@ -98,7 +115,8 @@ class TextDataset(Dataset):
             [int(v) for v in line.split(" ") if len(v) > 0] for line in lines
         ]
         lens = [len(line) for line in lines]
-        assert 0 not in lens, "Empty line."
+        if 0 in lens:
+            logger.info("Warning: empty line in an example.")
         lens = list(map(len, lines))
         curlen = len(lens) + sum(lens)
         left, right = 0, len(lines)
@@ -112,7 +130,10 @@ class TextDataset(Dataset):
         lines = lines[left:right]
         labels = example.labels[left:right]
         assert len(lines) + sum(map(len, lines)) <= args.max_source_length - 2, "Too long inputs in TextDataset.tokenize."
-        assert len(lines) == len(labels), "Not equal length in TextDataset.tokenize."
+        if len(lines) != len(labels):
+            logger.info("Not equal length in TextDataset.tokenize.")
+            lines = lines[:len(labels)]
+            labels = labels[:len(lines)]
         example.lines = lines
         example.labels = labels
         example.msg = self.encode_remove(tokenizer, example.msg, args)
@@ -252,7 +273,7 @@ class CommentGenDataset(TextDataset):
             examples = torch.load(savep)
         else:
             logger.info("Reading examples from {}".format(file_path))
-            examples = read_review_examples(file_path, samplenum)
+            examples = read_review_examples(file_path, samplenum, tokenizer)
             logger.info(f"Tokenize examples: {file_path}")
             examples = pool.map(self.tokenize, \
                 [(example, tokenizer, args) for example in examples])
@@ -335,13 +356,14 @@ class ReviewExample(object):
     """A single training/test example."""
 
     def __init__(
-        self, idx, oldf, diff, msg, cmtid,
+        self, idx, oldf, diff, msg, cmtid, max_len
     ):
         self.idx = idx      # idx is useless yet
         self.oldf = oldf
         self.diff = diff
         self.msg = msg
         self.cmtid = cmtid
+        self.max_len = max_len
         self.prevlines = []
         self.afterlines = []
         self.lines = []
@@ -356,12 +378,11 @@ class ReviewExample(object):
             return
         # Warning: lines is not self.lines
         # lines for rough length estimation
-        # 128 is a estimation for T5Tokenizer
         lines = [source_str.split() for source_str in self.lines]
         inputl = len(lines) # line tag
         inputl += sum(map(len, lines))
         left, right = 0, len(lines)
-        while inputl > 128 - 2:
+        while inputl > self.max_len:
             if left % 2 == 0:
                 inputl -= len(lines[left]) + 1
                 left += 1
@@ -375,25 +396,24 @@ class ReviewExample(object):
         afterlines = self.afterlines
         prev_after_len = max(len(prevlines), len(afterlines))
         i = 0
-        while inputl < 128 - 2 and i < prev_after_len:
+        while inputl < self.max_len and i < prev_after_len:
             if i < len(prevlines):
                 newl = inputl + len(prevlines[-1-i].split()) + 1
-                if newl > 128 - 2:
+                if newl > self.max_len:
                     break
                 self.lines.insert(0, prevlines[-1-i])
                 self.labels.insert(0, -100)
                 inputl = newl  # tag
             if i < len(afterlines):
                 newl = inputl + len(afterlines[i].split()) + 1
-                if newl > 128 - 2:
+                if newl > self.max_len:
                     break
                 self.lines.append(afterlines[i])
                 self.labels.append(-100)
                 inputl = newl    # tag
             i += 1
-        assert inputl <= 128 - 2, "Too long inputs."
+        assert inputl <= self.max_len, "Too long inputs."
         assert len(self.lines) == len(self.labels), "Not equal length."
-        # self.lines is about 128 now, let's tokenize it
         self.input = "<e0>".join(self.lines)
         self.prevlines, self.lines, self.afterlines = [], [], []
 
@@ -408,7 +428,7 @@ class ReviewExample(object):
             j -= 1
         line = line[i : j + 1]
         # keep ascii chars only
-        line = "".join([ch for ch in line if ord(ch) < 128])
+        line = line.encode("ascii", errors="ignore").decode("ascii")
         return line
 
     def align_and_clean(self):
@@ -471,7 +491,7 @@ class ReviewExample(object):
         self.labels = list(self.labels)
 
 
-def read_review_examples(filename, data_num=-1):
+def read_review_examples(filename, data_num=-1, tokenizer=None):
     """Read examples from filename."""
     examples = []
     idx = 0
@@ -482,12 +502,16 @@ def read_review_examples(filename, data_num=-1):
             except:
                 print("Error during reading json data.")
                 continue
+            maxl = 128
+            if isinstance(tokenizer, MyTokenizer):
+                maxl = 178
             example = ReviewExample(
                         idx=idx,
                         oldf=js["oldf"],
                         diff=js["patch"],
                         msg=js["msg"] if "msg" in js else "",
                         cmtid=js["cmtid"] if "cmtid" in js else "",
+                        max_len=maxl
                     )
             if example.avail:
                 examples.append(example)

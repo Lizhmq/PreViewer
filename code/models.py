@@ -1,3 +1,4 @@
+from calendar import weekday
 import os
 import torch.nn as nn
 import torch
@@ -25,26 +26,26 @@ class ReviewerModel(T5ForConditionalGeneration):
 
     def __init__(self, config):
         super().__init__(config)
-        self.cls_head = nn.Linear(config.d_model, 3, bias=True)
+        # self.cls_head = nn.Linear(config.d_model, 3, bias=True)
         self.init()
 
     @staticmethod
     def from_pretrained(path):
         model = T5ForConditionalGeneration.from_pretrained(path)
-        # model.lm_head = nn.Linear(model.config.d_model, model.config.vocab_size, bias=False)
         model.__class__ = ReviewerModel
-        model.cls_head = nn.Linear(model.config.d_model, 3, bias=True)
+        # model.cls_head = nn.Linear(model.config.d_model, 3, bias=True)
         model.init()
         return model
 
     def init(self):
+        pass
         # nn.init.xavier_uniform_(self.lm_head.weight)
-        factor = self.config.initializer_factor
+        # factor = self.config.initializer_factor
         # self.lm_head.weight.data.normal_(mean=0.0, \
         #     std=factor * ((self.config.d_model) ** -0.5))
-        self.cls_head.weight.data.normal_(mean=0.0, \
-            std=factor * ((self.config.d_model) ** -0.5))
-        self.cls_head.bias.data.zero_()
+        # self.cls_head.weight.data.normal_(mean=0.0, \
+        #     std=factor * ((self.config.d_model) ** -0.5))
+        # self.cls_head.bias.data.zero_()
 
 
     def forward(
@@ -123,7 +124,9 @@ class ReviewerModel(T5ForConditionalGeneration):
         if self.config.tie_word_embeddings: # this is True default
             sequence_output = sequence_output * (self.model_dim ** -0.5)
         if encoder_loss:
-            cls_logits = self.cls_head(hidden_states)
+            # print(self.encoder.get_input_embeddings().weight.shape)
+            cls_logits = nn.functional.linear(hidden_states, self.encoder.get_input_embeddings().weight)
+            # cls_logits = self.cls_head(hidden_states)
         lm_logits = self.lm_head(sequence_output)
         if decoder_input_ids is not None and input_labels is not None:
             lm_loss_fct = CrossEntropyLoss(ignore_index=0)      # Warning: PAD_ID should be 0

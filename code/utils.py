@@ -58,6 +58,7 @@ class MyTokenizer(object):
 class TextDataset(Dataset):
     def __init__(self, tokenizer, pool, args, file_path, samplenum=-1):
         self.cnt = 0
+        self.tokenizer = tokenizer
         if isinstance(tokenizer, MyTokenizer):
             tokenizer_type = "mytok"
         elif isinstance(tokenizer, T5Tokenizer):
@@ -182,6 +183,15 @@ class TextDataset(Dataset):
         pad_len = args.max_source_length - len(source_ids)
         source_ids += [tokenizer.pad_id] * pad_len
         input_labels += [-100] * pad_len
+
+        new_input_labels = []
+        map_dict = {0: tokenizer.del_id, 1: tokenizer.add_id, 2: tokenizer.keep_id}
+        for label in input_labels:
+            if label == -100:
+                new_input_labels.append(-100)
+            else:
+                new_input_labels.append(map_dict[label])
+        input_labels = new_input_labels
         assert len(source_ids) == args.max_source_length, "Not equal length."
         assert len(input_labels) == args.max_source_length, "Not equal length."
         return ReviewFeatures(example.idx, source_ids, input_labels, target_ids, type="label")

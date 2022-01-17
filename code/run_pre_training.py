@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 def get_loaders(data_list, args, tokenizer, pool):
     def fn(features):
         return features
+    local_rank = args.local_rank
     global_rank = args.global_rank
     world_size = args.world_size
     assert len(data_list) > 0, "Empty datalist."
@@ -39,13 +40,24 @@ def get_loaders(data_list, args, tokenizer, pool):
     data_list = data_list[: each_len * world_size]
     random.shuffle(data_list)       # this will shuffle data chunks
     curlist = data_list[global_rank * each_len : (global_rank + 1) * each_len]
-    concat_len = 5
+    concat_len = 2
     split_list = [curlist[i:i + concat_len] for i in range(0, len(curlist), concat_len)]
     # print(split_list)
     for data_files in split_list:
         logger.info(f"Start data files {data_files}.")
         # add concat dataset
         datasets = [TextDataset(tokenizer, pool, args, data_file) for data_file in data_files]
+        data_len = sum(len(dataset) for dataset in datasets)        # truncate to the same length
+        data_len = torch.tensor(data_len).to(local_rank)            # to keep same training size for different gpus
+        dist.all_reduce(data_len, op=dist.ReduceOp.MIN)
+        data_len = data_len.item()
+        prev_len = sum(len(dataset) for dataset in datasets[:-1])
+        last_len = data_len - prev_len
+        if global_rank == 0:
+            logger.info(f"Data length: {data_len}.")
+        logger.info(f"Rank: {global_rank}: drop {len(datasets[-1]) - last_len} samples.")
+        datasets[-1].reset_len(last_len)
+
         dataset = ConcatDataset(datasets)
         # sampler = DistributedSampler(dataset)
         sampler = RandomSampler(dataset)
@@ -166,7 +178,7 @@ def main(args):
         nb_tr_examples, nb_tr_steps, tr_loss = 0, 0, 0
         for _, _, dataloader in data_tuples:
             for step, examples in enumerate(dataloader, 1):
-                if step <= 3:
+                if step <= 1:
                     for ex in examples:
                         # if ex.type == "label":
                         logger.info(f"example type: {ex.type}")

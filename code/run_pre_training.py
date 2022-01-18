@@ -49,7 +49,8 @@ def get_loaders(data_list, args, tokenizer, pool):
         datasets = [TextDataset(tokenizer, pool, args, data_file) for data_file in data_files]
         data_len = sum(len(dataset) for dataset in datasets)        # truncate to the same length
         data_len = torch.tensor(data_len).to(local_rank)            # to keep same training size for different gpus
-        dist.all_reduce(data_len, op=dist.ReduceOp.MIN)
+        if world_size > 1:
+            dist.all_reduce(data_len, op=dist.ReduceOp.MIN)
         data_len = data_len.item()
         prev_len = sum(len(dataset) for dataset in datasets[:-1])
         last_len = data_len - prev_len

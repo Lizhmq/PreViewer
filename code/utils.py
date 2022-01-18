@@ -43,6 +43,10 @@ class MyTokenizer(object):
     def convert_ids_to_tokens(self, ids):
         vocab = self.id2token
         return [vocab[i] for i in ids]
+    
+    def decode(self, ids, **kwargs):    ##### to be update
+        tokens = self.convert_ids_to_tokens(ids)
+        return " ".join(tokens)
 
     def encode(self, text, **kwargs):
         text = text.encode("ascii", errors="ignore").decode("ascii")
@@ -281,7 +285,14 @@ class TextDataset(Dataset):
 
 class CommentGenDataset(TextDataset):
     def __init__(self, tokenizer, pool, args, file_path, samplenum=-1):
-        savep = file_path.replace(".jsonl", ".exps")
+        self.tokenizer = tokenizer
+        if isinstance(tokenizer, MyTokenizer):
+            tokenizer_type = "mytok"
+        elif isinstance(tokenizer, T5Tokenizer):
+            tokenizer_type = ""
+        else:
+            tokenizer_type = "unk"
+        savep = file_path.replace(".jsonl", tokenizer_type + ".exps")
         if os.path.exists(savep):
             logger.info("Loading examples from {}".format(savep))
             examples = torch.load(savep)

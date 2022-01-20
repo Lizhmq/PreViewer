@@ -13,11 +13,11 @@ NCCL_DEBUG=INFO
 # python -m torch.distributed.launch --nproc_per_node ${PER_NODE_GPU} --node_rank=${RANK} --nnodes=${WORLD_SIZE} --master_addr=${MASTER_HOST} --master_port=${MASTER_PORT} ../run_pre_training.py  \
 RANK=0 WORLD_SIZE=1 MASTER_ADDR=localhost MASTER_PORT=23333 \
 python ../preprocess.py \
-  --model_type t5 \
+  --model_type scratch \
   --add_lang_ids \
   --train_epochs 30 \
   --config_name t5-base \
-  --tokenizer_path t5-base \
+  --tokenizer_path ${mnt_dir}/PreViewer/code/tokenizer \
   --model_name_or_path t5-base \
   --output_dir ${mnt_dir}/PreViewer/saved_models \
   --train_path ${mnt_dir}/processed \

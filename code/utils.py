@@ -316,6 +316,35 @@ class CommentGenDataset(TextDataset):
         return self.msg_example(item)
 
 
+class CommentClsDataset(TextDataset):
+    def __init__(self, tokenizer, pool, args, file_path, samplenum=-1):
+        self.tokenizer = tokenizer
+        if isinstance(tokenizer, MyTokenizer):
+            tokenizer_type = "mytok"
+        elif isinstance(tokenizer, T5Tokenizer):
+            tokenizer_type = ""
+        else:
+            tokenizer_type = "unk"
+        savep = file_path.replace(".jsonl", tokenizer_type + ".exps")
+        if os.path.exists(savep):
+            logger.info("Loading examples from {}".format(savep))
+            examples = torch.load(savep)
+        else:
+            logger.info("Reading examples from {}".format(file_path))
+            examples = read_review_examples(file_path, samplenum, tokenizer)
+            logger.info(f"Tokenize examples: {file_path}")
+            examples = pool.map(self.tokenize, \
+                [(example, tokenizer, args) for example in examples])
+            torch.save(examples, savep)
+        logger.info("Convert examples to features...")
+        self.set_start_end_ids(examples)
+        self.feats = pool.map(self.convert_examples_to_features, \
+            [(example, tokenizer, args) for example in examples])
+
+    def convert_examples_to_features(self, item):
+        example, tokenizer, args = item
+        tmpfeature = self.msg_example(item)
+        return ClsFeatures(tmpfeature.example_id, tmpfeature.source_ids, example.y)
 
 
 class InputFeatures(object):
@@ -337,11 +366,17 @@ class ReviewFeatures(object):
         assert type in ("label", "line", "msg")
         self.type = type
 
+class ClsFeatures(object):
+    def __init__(self, example_id, source_ids, y):
+        self.example_id = example_id
+        self.source_ids = source_ids
+        self.y = y
+
 class ReviewExample(object):
     """A single training/test example."""
 
     def __init__(
-        self, idx, oldf, diff, msg, cmtid, max_len
+        self, idx, oldf, diff, msg, cmtid, max_len, y
     ):
         self.idx = idx      # idx is useless yet
         self.oldf = oldf
@@ -349,6 +384,7 @@ class ReviewExample(object):
         self.msg = msg
         self.cmtid = cmtid
         self.max_len = max_len
+        self.y = y
         self.prevlines = []
         self.afterlines = []
         self.lines = []
@@ -490,13 +526,20 @@ def read_review_examples(filename, data_num=-1, tokenizer=None):
             maxl = 128
             if isinstance(tokenizer, MyTokenizer):
                 maxl = 178
+            if "y" not in js:
+                js["y"] = 0
+            if "msg" in js and len(js["msg"]) > 0:
+                js["y"] = 1
+            if isinstance(js["y"], list):       # a previous bug in data processing
+                js["y"] = js["y"][0]
             example = ReviewExample(
                         idx=idx,
                         oldf=js["oldf"],
                         diff=js["patch"],
                         msg=js["msg"] if "msg" in js else "",
                         cmtid=js["cmtid"] if "cmtid" in js else "",
-                        max_len=maxl
+                        max_len=maxl,
+                        y=js["y"]
                     )
             if example.avail:
                 examples.append(example)

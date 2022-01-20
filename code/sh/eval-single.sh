@@ -12,14 +12,14 @@ NCCL_DEBUG=INFO
 
 # python -m torch.distributed.launch --nproc_per_node ${PER_NODE_GPU} --node_rank=${RANK} --nnodes=${WORLD_SIZE} --master_addr=${MASTER_HOST} --master_port=${MASTER_PORT} ../eval_pret.py  \
 RANK=0 WORLD_SIZE=1 MASTER_ADDR=localhost MASTER_PORT=23333 \
-python ../eval_pret.py \
+python ../run_eval_pret.py \
   --model_type t5 \
   --add_lang_ids \
   --train_epochs 30 \
   --config_name t5-base \
   --tokenizer_path t5-base \
   --model_name_or_path t5-base \
-  --load_model_path ${mnt_dir}/PreViewer/saved_models_shuai/saved_models/checkpoints-80000 \
+  --load_model_path ${mnt_dir}/PreViewer/saved_models_t5/checkpoints-115000 \
   --output_dir not_used \
   --eval_file ${mnt_dir}/processed/chunk_8.jsonl \
   --max_source_length 512 \
@@ -33,6 +33,9 @@ python ../eval_pret.py \
 
 
 # 50000: step 700: loss 0.848, ppl 2.334
-# 80000: step 700: loss 0.828, ppl 2.289
-# 100000: step 700: loss 0.795, ppl 2.214
-# 115000: step 700: loss 0.803, ppl 2.232
+# 100000: step 8333: loss 0.804, ppl 2.235
+# 140000: step 8333: loss 0.800, ppl 2.226
+# 170000: step 8333: loss 0.793, ppl 2.21
+
+
+# 115000: step 700: loss 1.644, ppl 5.175

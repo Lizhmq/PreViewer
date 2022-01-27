@@ -7,14 +7,12 @@ import multiprocessing
 import time, json
 import torch.distributed as dist
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
-from utils import CommentGenDataset
+from utils import TextDataset
 from models import build_or_load_gen_model
 from configs import add_args, set_seed, set_dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from evaluator.bleu import _bleu
-from evaluator import smooth_bleu
 from tqdm import tqdm
-from transformers import RobertaTokenizer
 
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
@@ -29,7 +27,7 @@ def get_loader(data_file, args, tokenizer, pool):
         return features
     logger.info(f"Start data file {data_file}.")
     # add concat dataset
-    dataset = CommentGenDataset(tokenizer, pool, args, data_file)
+    dataset = TextDataset(tokenizer, pool, args, data_file)
     # sampler = DistributedSampler(dataset)
     sampler = SequentialSampler(dataset)
     dataloader = DataLoader(dataset, sampler=sampler, batch_size=args.eval_batch_size, num_workers=args.cpu_count, collate_fn=fn)
@@ -88,14 +86,17 @@ def eval_bleu_epoch(args, eval_dataloader, model, tokenizer):
     if hasattr(model, "module"):
         model = model.module
     pred_ids, ex_ids = [], []
+    gold_src, gold_tgt = [], []
     kk = 0
     for step, examples in tqdm(enumerate(eval_dataloader)):
         kk += 1
-        if kk == 101:
+        if kk == 6:
             break
         source_ids = torch.tensor(
             [ex.source_ids for ex in examples], dtype=torch.long
         ).to(args.local_rank)
+        gold_src.extend(tokenizer.decode(ex.source_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False) for ex in examples)
+        gold_tgt.extend(tokenizer.decode(ex.target_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False) for ex in examples)
         ids = [ex.example_id for ex in examples]
         source_mask = source_ids.ne(tokenizer.pad_id)
         preds = model.generate(source_ids,
@@ -108,60 +109,40 @@ def eval_bleu_epoch(args, eval_dataloader, model, tokenizer):
         pred_ids.extend(top_preds)
         ex_ids.extend(ids)
     pred_nls = [tokenizer.decode(id, skip_special_tokens=True, clean_up_tokenization_spaces=False) for id in pred_ids]
-    if not isinstance(tokenizer, RobertaTokenizer):     # not codet5
-        pred_nls = [" ".join(nl.split()[2:]) for nl in pred_nls]
-    else:
-        pred_nls = [" ".join(nl.split()[1:]) for nl in pred_nls]
-    output_fn = "test.output"
-    gold_fn = "test.gold"
-    src_fn = "test.src"
 
-    # output_fn = os.path.join(args.load_model_path, "test.output")
-    # gold_fn = os.path.join(args.load_model_path, "test.gold")
-    # src_fn = os.path.join(args.load_model_path, "test.src")
+    output_fn = os.path.join(args.load_model_path, "test.output")
+    gold_fn = os.path.join(args.load_model_path, "test.gold")
+    src_fn = os.path.join(args.load_model_path, "test.src")
 
-    gold_src, gold_tgt = [], []
-    with open(args.eval_file, "r") as f:
-        for line in f:
-            line = line.strip()
-            js = json.loads(line)
-            if "msg" not in js or len(js["msg"]) == 0:
-                continue
-            src = js["patch"].replace("\n", "\\n")
-            tgt = js["msg"].replace("\n", " ")
-            gold_src.append(src)
-            gold_tgt.append(tgt)
-    # gold_src = [gold_src[i] for i in ex_ids]
-    # gold_tgt = [gold_tgt[i] for i in ex_ids]
+    # gold_src, gold_tgt = [], []
+    # with open(args.eval_file, "r") as f:
+    #     for line in f:
+    #         line = line.strip()
+    #         js = json.loads(line)
+    #         if "msg" not in js or len(js["msg"]) == 0:
+    #             continue
+    #         src = js["patch"].replace("\n", "\\n")
+    #         tgt = js["msg"].replace("\n", " ")
+    #         gold_src.append(src)
+    #         gold_tgt.append(tgt)
+    gold_src = [gold_src[i] for i in ex_ids]
+    gold_tgt = [gold_tgt[i] for i in ex_ids]
     logger.info(f"Gold len: {len(gold_src)}")
     logger.info(f"Pred len: {len(pred_nls)}")
     dev_accs = []
-    with open(output_fn, 'w', encoding="utf-8") as f, \
-         open(gold_fn, 'w', encoding="utf-8") as f1, \
-         open(src_fn, 'w', encoding="utf-8") as f2:
+    with open(output_fn, 'w') as f, open(gold_fn, 'w') as f1, open(src_fn, 'w') as f2:
         for pred_nl, src, tgt in zip(pred_nls, gold_src, gold_tgt):
             dev_accs.append(pred_nl.strip() == tgt.strip())
             f.write(pred_nl.strip().replace("\n", " ") + '\n')
             f1.write(tgt.strip() + '\n')
             f2.write(src.strip() + '\n')
-    return
-    # time.sleep(10)
-    # pred_file = open(output_fn).readlines()
-    # predictions = [pred.strip() for pred in pred_file]
-    # predictions = [str(i) + "\t" + pred.replace("\t", " ") for (i, pred) in enumerate(predictions)]
-    # new_gold_fn = gold_fn + ".new"
-    # gold_file = open(gold_fn, 'r').readlines()
-    # gold_file = [gold.strip() for gold in gold_file]
-    # gold_file = [str(i) + "\t" + gold.replace("\t", " ") for (i, gold) in enumerate(gold_file)]
-    # open(new_gold_fn, 'w').write('\n'.join(gold_file))
-    # (goldMap, predictionMap) = smooth_bleu.computeMaps(predictions, new_gold_fn)
-    # bleu = round(smooth_bleu.bleuFromMaps(goldMap, predictionMap)[0], 2)
-    # em = np.mean(dev_accs) * 100
-    # result = {'em': em, 'bleu': bleu}
-    # logger.info("***** Eval results *****")
-    # for key in sorted(result.keys()):
-    #     logger.info("  %s = %s", key, str(round(result[key], 4)))
-    # return result
+    bleu = round(_bleu(gold_fn, output_fn), 2)
+    em = np.mean(dev_accs) * 100
+    result = {'em': em, 'bleu': bleu}
+    logger.info("***** Eval results *****")
+    for key in sorted(result.keys()):
+        logger.info("  %s = %s", key, str(round(result[key], 4)))
+    return result
 
 
 def main(args):
@@ -178,6 +159,11 @@ def main(args):
     set_seed(args)
     # load model
     _, model, tokenizer = build_or_load_gen_model(args)
+    # load last model
+    if os.path.exists("{}/checkpoints-last/pytorch_model.bin".format(args.output_dir)):
+        model.load_state_dict(
+            torch.load("{}/checkpoints-last/pytorch_model.bin".format(args.output_dir))
+        )
     model = DDP(model.cuda(), device_ids=[local_rank], output_device=local_rank)
     pool = multiprocessing.Pool(args.cpu_count)
 

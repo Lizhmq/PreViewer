@@ -116,7 +116,7 @@ def main(args):
         args.train_steps = 200
     else:
         # bchunk for big chunks, chunk for small chunks
-        files = sorted([file for file in os.listdir(args.train_path) if file.startswith("clschunk_train0") and file.endswith(".jsonl")])
+        files = sorted([file for file in os.listdir(args.train_path) if file.startswith("clschunk_train") and file.endswith(".jsonl")])
         data_list = [os.path.join(args.train_path, file) for file in files]
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ["bias", "LayerNorm.weight"]

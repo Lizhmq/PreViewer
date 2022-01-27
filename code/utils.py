@@ -325,7 +325,7 @@ class CommentClsDataset(TextDataset):
             tokenizer_type = ""
         else:
             tokenizer_type = "unk"
-        savep = file_path.replace(".jsonl", tokenizer_type + ".exps")
+        savep = file_path.replace(".jsonl", tokenizer_type + "_cls.exps")
         if os.path.exists(savep):
             logger.info("Loading examples from {}".format(savep))
             examples = torch.load(savep)

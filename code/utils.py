@@ -1,6 +1,7 @@
 import re, json
 import os, random
 import torch, logging
+from copy import deepcopy as cp
 from torch.utils.data import Dataset
 from tokenizers import ByteLevelBPETokenizer
 from transformers import T5Tokenizer
@@ -63,6 +64,7 @@ class TextDataset(Dataset):
     def __init__(self, tokenizer, pool, args, file_path, samplenum=-1):
         self.cnt = 0
         self.tokenizer = tokenizer
+        self.args = args
         if isinstance(tokenizer, MyTokenizer):
             tokenizer_type = "mytok"
         elif isinstance(tokenizer, T5Tokenizer):
@@ -154,7 +156,10 @@ class TextDataset(Dataset):
             exs = []
             for _ in range(2):  # up sampling
                 if random.random() < 5 / 6:
-                    exs.append(self.msg_example(item))
+                    if random.random() < 0.5:
+                        exs.append(self.genmsg_example(item))
+                    else:
+                        exs.append(self.daemsg_example(item))
                 elif random.random() < 0.5:
                     exs.append(self.encoder_example(item))
                 else:
@@ -229,19 +234,10 @@ class TextDataset(Dataset):
                 source_ids.extend(line)
             if i == example.end_id:
                 source_ids.append(tokenizer.end_id)
-        source_ids = source_ids[:args.max_source_length - 2]
-        source_ids = [tokenizer.bos_id] + source_ids + [tokenizer.eos_id]
-        pad_len = args.max_source_length - len(source_ids)
-        source_ids += [tokenizer.pad_id] * pad_len
-        target_ids = target_ids[:args.max_target_length - 2]
-        target_ids = [tokenizer.bos_id] + target_ids + [tokenizer.eos_id]
-        pad_len = args.max_target_length - len(target_ids)
-        target_ids += [tokenizer.pad_id] * pad_len
-        assert len(source_ids) == args.max_source_length, "Not equal length."
-        assert len(target_ids) == args.max_target_length, "Not equal length."
+        source_ids, target_ids = self.pad_assert(source_ids, target_ids, args, tokenizer)
         return ReviewFeatures(example.idx, source_ids, input_labels, target_ids, type="line")
 
-    def msg_example(self, item):
+    def genmsg_example(self, item):
         example, tokenizer, args = item
         lines = example.lines
         labels = example.labels
@@ -259,17 +255,49 @@ class TextDataset(Dataset):
         target_ids.append(tokenizer.msg_id)
         target_ids.extend(example.msg)
         assert len(source_ids) <= args.max_source_length, f"Too long inputs: {len(source_ids)}."
+        source_ids, target_ids = self.pad_assert(source_ids, target_ids, args, tokenizer)
+        return ReviewFeatures(example.idx, source_ids, input_labels, target_ids, type="genmsg")
+
+    # TODO: test this function
+    def daemsg_example(self, item):
+        example, tokenizer, args = item
+        input_labels = [-100] * args.max_source_length
+        source_ids, target_ids = [], []
+        msg_ids = cp(example.msg)
+        masks = [random.rand() < 0.15 for _ in range(len(msg_ids))]
+        source_ids, target_ids = [], []
+        i = 0
+        SPECIAL_ID = 0
+        while i < len(masks):
+            j = i
+            while j < len(masks) and not masks[j]:
+                source_ids.append(msg_ids[j])
+                j += 1
+            if j == len(masks):
+                break
+            source_ids.append(tokenizer.special_dict[f"<e{SPECIAL_ID}>"])
+            target_ids.append(tokenizer.special_dict[f"<e{SPECIAL_ID}>"])
+            while j < len(masks) and masks[j]:
+                target_ids.append(msg_ids[j])
+                j += 1
+            if SPECIAL_ID < 99:     # only 0-99 ids in vocab
+                SPECIAL_ID += 1
+            i = j
+        source_ids, target_ids = self.pad_assert(source_ids, target_ids, args, tokenizer)
+        return ReviewFeatures(example.idx, source_ids, input_labels, target_ids, type="daemsg")
+
+    def pad_assert(self, source_ids, target_ids, args, tokenizer):
         source_ids = source_ids[:args.max_source_length - 2]
         source_ids = [tokenizer.bos_id] + source_ids + [tokenizer.eos_id]
         pad_len = args.max_source_length - len(source_ids)
         source_ids += [tokenizer.pad_id] * pad_len
-        target_ids = target_ids[:args.max_target_length - 2]
-        target_ids = [tokenizer.bos_id] + target_ids + [tokenizer.eos_id]
+        target_ids = target_ids[:args.max_target_length - 1]
+        target_ids = target_ids + [tokenizer.eos_id]
         pad_len = args.max_target_length - len(target_ids)
         target_ids += [tokenizer.pad_id] * pad_len
         assert len(source_ids) == args.max_source_length, "Not equal length."
         assert len(target_ids) == args.max_target_length, "Not equal length."
-        return ReviewFeatures(example.idx, source_ids, input_labels, target_ids, type="msg")
+        return source_ids, target_ids
 
     def encode_remove(self, tokenizer, text, args):
         text = tokenizer.encode(text, max_length=args.max_source_length, truncation=True)
@@ -313,7 +341,7 @@ class CommentGenDataset(TextDataset):
         example, tokenizer, args = item
         if len(example.msg) == 0:
             return None
-        return self.msg_example(item)
+        return self.genmsg_example(item)
 
 
 class CommentClsDataset(TextDataset):
@@ -343,7 +371,7 @@ class CommentClsDataset(TextDataset):
 
     def convert_examples_to_features(self, item):
         example, tokenizer, args = item
-        tmpfeature = self.msg_example(item)
+        tmpfeature = self.genmsg_example(item)
         return ClsFeatures(tmpfeature.example_id, tmpfeature.source_ids, example.y)
 
 
@@ -363,7 +391,7 @@ class ReviewFeatures(object):
         self.source_ids = source_ids
         self.source_labels = source_labels
         self.target_ids = target_ids
-        assert type in ("label", "line", "msg")
+        assert type in ("label", "line", "genmsg", "daemsg")
         self.type = type
 
 class ClsFeatures(object):

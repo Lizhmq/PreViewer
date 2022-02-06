@@ -6,3 +6,5 @@ saved*
 *.yaml
 *nohup*
 *.txt
+*(\.?)amlt*
+pretrained_models

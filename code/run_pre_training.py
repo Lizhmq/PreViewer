@@ -3,14 +3,11 @@ import torch
 import logging
 import argparse
 import random
-import numpy as np
-from tqdm import tqdm
 import multiprocessing
 import time
-from itertools import cycle
 from torch.utils.data import DataLoader, RandomSampler
 from torch.utils.data import ConcatDataset
-from torch.utils.data.distributed import DistributedSampler
+from torch.utils.data.distributed import SequentialSampler, DistributedSampler
 from transformers import AdamW, get_linear_schedule_with_warmup
 from models import build_or_load_gen_model
 from configs import add_args, set_seed, set_dist
@@ -88,6 +85,57 @@ def save_model(model, optimizer, scheduler, output_dir, config):
     )
 
 
+def evaluate(data_list, args, model, tokenizer, pool):
+    def fn(features):
+        return features
+    local_rank = args.local_rank
+    logger.info(f"Eval start  data files {data_list}.")
+    # add concat dataset
+    datasets = [TextDataset(tokenizer, pool, args, data_file) for data_file in data_list]
+
+    dataset = ConcatDataset(datasets)
+    sampler = SequentialSampler(dataset)
+    dataloader = DataLoader(dataset, sampler=sampler, batch_size=args.train_batch_size, num_workers=args.cpu_count, collate_fn=fn)
+    logger.info(f"Finish data files {data_list}.")
+
+    eval_loss = 0.0
+    eval_steps = 0
+    model.eval()
+    for step, examples in enumerate(dataloader, 1):
+        with torch.no_grad():
+            source_ids = torch.tensor(
+                [ex.source_ids for ex in examples], dtype=torch.long
+            ).to(local_rank)
+            source_labels = torch.tensor(
+                [ex.source_labels for ex in examples], dtype=torch.long
+            ).to(local_rank)
+            target_ids = torch.tensor(
+                [ex.target_ids for ex in examples], dtype=torch.long
+            ).to(local_rank)
+            source_mask = source_ids.ne(tokenizer.pad_id)
+            target_mask = target_ids.ne(tokenizer.pad_id)
+
+            loss = model(
+                input_ids=source_ids,
+                input_labels=source_labels,
+                decoder_input_ids=target_ids,
+                attention_mask=source_mask,
+                decoder_attention_mask=target_mask,
+            )
+
+            eval_loss += loss.mean().item()
+        eval_steps += 1
+        if eval_steps % args.log_steps == 0:
+            logger.info(f"  eval steps: {eval_steps}")
+    
+    eval_loss = eval_loss / eval_steps
+    perplexity = torch.exp(torch.tensor(eval_loss))
+
+    model.train()
+
+    return float(perplexity)
+
+
 def main(args):
     dist.init_process_group(backend="nccl")
     local_rank = dist.get_rank() % args.gpu_per_node
@@ -118,9 +166,12 @@ def main(args):
         args.log_steps = 5
         args.train_steps = 200
     else:
-        # bchunk for big chunks, chunk for small chunks
-        files = sorted([file for file in os.listdir(args.train_path) if file.startswith("chunk") and file.endswith(".jsonl")])
-        data_list = [os.path.join(args.train_path, file) for file in files]
+        files = sorted(
+            [file for file in os.listdir(args.train_path) if file.startswith("pretrain") and file.endswith(".jsonl")],
+            key=lambda f: int(f.split(".")[-2].split("_")[-1]),     # sort by int value
+        )
+        data_list = [os.path.join(args.train_path, file) for file in files if "_64" not in file and "_65" not in file]
+        eval_data_list = [os.path.join(args.train_path, file) for file in files if "_64" in file]
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ["bias", "LayerNorm.weight"]
     optimizer_grouped_parameters = [
@@ -179,7 +230,7 @@ def main(args):
         nb_tr_examples, nb_tr_steps, tr_loss = 0, 0, 0
         for _, _, dataloader in data_tuples:
             for step, examples in enumerate(dataloader, 1):
-                if step <= 1:
+                if local_rank == 0 and step <= 2:
                     for ex in examples:
                         # if ex.type == "label":
                         logger.info(f"example type: {ex.type}")
@@ -248,6 +299,8 @@ def main(args):
                         nb_tr_steps % args.gradient_accumulation_steps == 0:
                         # global_step > 0 and global_step % save_steps == 0:
                     # eval_loss = eval(args, model)
+                    eval_ppl = round(evaluate(eval_data_list, args, model, tokenizer, pool), 2)
+                    logger.info(f"Evaluate perplexity: {eval_ppl}")
                     output_dir = os.path.join(args.output_dir, "checkpoints-" + str(global_step))
                     save_model(model, optimizer, scheduler, output_dir, config)
                     logger.info(

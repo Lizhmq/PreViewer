@@ -4,8 +4,7 @@ import torch, logging
 from copy import deepcopy as cp
 from torch.utils.data import Dataset
 from tokenizers import ByteLevelBPETokenizer
-from transformers import T5Tokenizer
-from transformers import RobertaTokenizer
+from transformers import T5Tokenizer, RobertaTokenizer
 
 
 logging.basicConfig(
@@ -69,6 +68,8 @@ class TextDataset(Dataset):
             tokenizer_type = "mytok"
         elif isinstance(tokenizer, T5Tokenizer):
             tokenizer_type = ""
+        elif isinstance(tokenizer, RobertaTokenizer):
+            tokenizer_type = "rb"
         else:
             tokenizer_type = "unk"
         savep = file_path.replace(".jsonl", tokenizer_type + ".exps")
@@ -150,20 +151,16 @@ class TextDataset(Dataset):
         example.msg = self.encode_remove(tokenizer, example.msg, args)
         return example
 
+    # TODO: redistribute probability
     def convert_examples_to_features(self, item):
         example, _, _ = item
         if len(example.msg) > 0:
             exs = []
-            for _ in range(2):  # up sampling
-                if random.random() < 5 / 6:
-                    if random.random() < 0.5:
-                        exs.append(self.genmsg_example(item))
-                    else:
-                        exs.append(self.daemsg_example(item))
-                elif random.random() < 0.5:
-                    exs.append(self.encoder_example(item))
+            for _ in range(3):  # up sampling
+                if random.random() < 0.5:
+                    exs.append(self.genmsg_example(item))
                 else:
-                    exs.append(self.decoder_example(item))
+                    exs.append(self.daemsg_example(item))
             return exs
         if random.random() < 0.5:
             return [self.encoder_example(item)]
@@ -258,13 +255,15 @@ class TextDataset(Dataset):
         source_ids, target_ids = self.pad_assert(source_ids, target_ids, args, tokenizer)
         return ReviewFeatures(example.idx, source_ids, input_labels, target_ids, type="genmsg")
 
-    # TODO: test this function
     def daemsg_example(self, item):
         example, tokenizer, args = item
         input_labels = [-100] * args.max_source_length
         source_ids, target_ids = [], []
         msg_ids = cp(example.msg)
-        masks = [random.rand() < 0.15 for _ in range(len(msg_ids))]
+        masks = [random.random() < 0.20 for _ in range(len(msg_ids))]
+        if sum(masks) == 0:
+            idx = random.choice(range(len(msg_ids)))
+            masks[idx] = True
         source_ids, target_ids = [], []
         i = 0
         SPECIAL_ID = 0
@@ -318,6 +317,8 @@ class CommentGenDataset(TextDataset):
             tokenizer_type = "mytok"
         elif isinstance(tokenizer, T5Tokenizer):
             tokenizer_type = ""
+        elif isinstance(tokenizer, RobertaTokenizer):
+            tokenizer_type = "rb"
         else:
             tokenizer_type = "unk"
         savep = file_path.replace(".jsonl", tokenizer_type + ".exps")
@@ -467,6 +468,9 @@ class ReviewExample(object):
         self.prevlines, self.lines, self.afterlines = [], [], []
 
     def remove_space_clean(self, line):
+        """
+            Remove start and end empty chars.
+        """
         rep = " \t\r"
         totallen = len(line)
         i = 0
@@ -476,8 +480,6 @@ class ReviewExample(object):
         while j >= 0 and line[j] in rep:
             j -= 1
         line = line[i : j + 1]
-        # keep ascii chars only
-        line = line.encode("ascii", errors="ignore").decode("ascii")
         return line
 
     def align_and_clean(self):
@@ -551,15 +553,11 @@ def read_review_examples(filename, data_num=-1, tokenizer=None):
             except:
                 print("Error during reading json data.")
                 continue
-            maxl = 128
-            if isinstance(tokenizer, MyTokenizer):
-                maxl = 178
+            maxl = 200
             if "y" not in js:
                 js["y"] = 0
             if "msg" in js and len(js["msg"]) > 0:
                 js["y"] = 1
-            if isinstance(js["y"], list):       # a previous bug in data processing
-                js["y"] = js["y"][0]
             example = ReviewExample(
                         idx=idx,
                         oldf=js["oldf"],

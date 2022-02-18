@@ -26,7 +26,7 @@ class ReviewerModel(T5ForConditionalGeneration):
 
     def __init__(self, config):
         super().__init__(config)
-        self.cls_head = None
+        self.cls_head = nn.Linear(self.config.d_model, 2, bias=True)
         self.init()
 
     @staticmethod
@@ -36,17 +36,12 @@ class ReviewerModel(T5ForConditionalGeneration):
         model.init()
         return model
 
-    def set_cls(self, out_dim=2):
-        self.cls_head = nn.Linear(self.config.d_model, out_dim, bias=True)
-        self.init()
-
     def init(self):
-        if hasattr(self, "cls_head") and self.cls_head:
-            nn.init.xavier_uniform_(self.lm_head.weight)
-            factor = self.config.initializer_factor
-            self.cls_head.weight.data.normal_(mean=0.0, \
-                std=factor * ((self.config.d_model) ** -0.5))
-            self.cls_head.bias.data.zero_()
+        nn.init.xavier_uniform_(self.lm_head.weight)
+        factor = self.config.initializer_factor
+        self.cls_head.weight.data.normal_(mean=0.0, \
+            std=factor * ((self.config.d_model) ** -0.5))
+        self.cls_head.bias.data.zero_()
 
     def forward(
         self, *argv, **kwargs
@@ -276,8 +271,6 @@ def get_model_size(model):
 
 
 def build_or_load_gen_model(args):
-    if not hasattr(args, "set_cls") or not args.set_cls:
-        args.set_cls = False
     assert args.model_type.lower() in ["codet5", "t5", "scratch"]  # only t5 supported now
     config_class, model_class, tokenizer_class = MODEL_CLASSES[args.model_type]
 
@@ -305,8 +298,6 @@ def build_or_load_gen_model(args):
         get_model_size(model),
         args.model_name_or_path,
     )
-    if args.set_cls:
-        model.set_cls()
     if args.load_model_path is not None:
         model_path = os.path.join(args.load_model_path, "pytorch_model.bin")
         logger.info("Reload model from {}".format(model_path))

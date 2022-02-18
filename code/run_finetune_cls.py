@@ -99,7 +99,6 @@ def main(args):
     # t0 = time.time()
     # set_dist(args)
     set_seed(args)
-    args.set_cls = True
     config, model, tokenizer = build_or_load_gen_model(args)
     # load last model
     if os.path.exists("{}/checkpoints-last/pytorch_model.bin".format(args.output_dir)):

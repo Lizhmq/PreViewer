@@ -89,7 +89,6 @@ def main(args):
     torch.cuda.set_device(local_rank)
 
     set_seed(args)
-    args.set_cls = True
     config, model, tokenizer = build_or_load_gen_model(args)
     model = DDP(model.cuda(), device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
     pool = multiprocessing.Pool(args.cpu_count)

@@ -127,8 +127,8 @@ class TextDataset(Dataset):
             [int(v) for v in line.split(" ") if len(v) > 0] for line in lines
         ]
         lens = [len(line) for line in lines]
-        if 0 in lens:
-            logger.info("Warning: empty line in an example.")
+        # if 0 in lens:
+        #     logger.info("Warning: empty line in an example.")
         lens = list(map(len, lines))
         curlen = len(lens) + sum(lens)
         left, right = 0, len(lines)

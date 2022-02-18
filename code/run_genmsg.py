@@ -178,7 +178,7 @@ def main(args):
     set_seed(args)
     # load model
     _, model, tokenizer = build_or_load_gen_model(args)
-    model = DDP(model.cuda(), device_ids=[local_rank], output_device=local_rank)
+    model = DDP(model.cuda(), device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
     pool = multiprocessing.Pool(args.cpu_count)
 
     data_file = args.eval_file

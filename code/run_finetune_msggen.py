@@ -17,6 +17,7 @@ from configs import add_args, set_seed, set_dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 from utils import CommentGenDataset
+from evaluator.smooth_bleu import bleu_fromstr
 
 
 logging.basicConfig(
@@ -100,17 +101,9 @@ def main(args):
                    args.train_batch_size)
     torch.cuda.set_device(local_rank)
 
-    # t0 = time.time()
-    # set_dist(args)
     set_seed(args)
     config, model, tokenizer = build_or_load_gen_model(args)
-    # load last model
-    if os.path.exists("{}/checkpoints-last/pytorch_model.bin".format(args.output_dir)):
-        model.load_state_dict(
-            torch.load("{}/checkpoints-last/pytorch_model.bin".format(args.output_dir))
-        )
-    model.cls_head = None
-    model = DDP(model.cuda(), device_ids=[local_rank], output_device=local_rank)
+    model = DDP(model.cuda(), device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
     pool = multiprocessing.Pool(args.cpu_count)
 
     if args.debug:

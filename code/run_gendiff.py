@@ -164,7 +164,7 @@ def main(args):
         model.load_state_dict(
             torch.load("{}/checkpoints-last/pytorch_model.bin".format(args.output_dir))
         )
-    model = DDP(model.cuda(), device_ids=[local_rank], output_device=local_rank)
+    model = DDP(model.cuda(), device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
     pool = multiprocessing.Pool(args.cpu_count)
 
     data_file = args.eval_file

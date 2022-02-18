@@ -161,10 +161,17 @@ def splitPuncts(line):
     return ' '.join(re.findall(r"[\w]+|[^\s\w]", line))
 
 
+def bleu_fromstr(predictions, golds):
+    predictions = [str(i) + "\t" + pred.replace("\t", " ") for (i, pred) in enumerate(predictions)]
+    golds = [str(i) + "\t" + gold.replace("\t", " ") for (i, gold) in enumerate(golds)]
+    goldMap, predictionMap = computeMaps(predictions, golds)
+    bleu = round(bleuFromMaps(goldMap, predictionMap)[0], 2)
+    return bleu
+
+
 def computeMaps(predictions, goldfile):
     predictionMap = {}
     goldMap = {}
-    gf = open(goldfile, 'r')
 
     for row in predictions:
         cols = row.strip().split('\t')
@@ -174,7 +181,7 @@ def computeMaps(predictions, goldfile):
             (rid, pred) = (cols[0], cols[1])
         predictionMap[rid] = [splitPuncts(pred.strip().lower())]
 
-    for row in gf:
+    for row in goldfile:
         (rid, pred) = row.split('\t')
         if rid in predictionMap:  # Only insert if the id exists for the method
             if rid not in goldMap:

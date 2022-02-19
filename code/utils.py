@@ -352,9 +352,11 @@ class CommentClsDataset(TextDataset):
             tokenizer_type = "mytok"
         elif isinstance(tokenizer, T5Tokenizer):
             tokenizer_type = ""
+        elif isinstance(tokenizer, RobertaTokenizer):
+            tokenizer_type = "rb"
         else:
             tokenizer_type = "unk"
-        savep = file_path.replace(".jsonl", tokenizer_type + "_cls.exps")
+        savep = file_path.replace(".jsonl", tokenizer_type + ".exps")
         if os.path.exists(savep):
             logger.info("Loading examples from {}".format(savep))
             examples = torch.load(savep)

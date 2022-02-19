@@ -13,13 +13,13 @@ NCCL_DEBUG=INFO
 # python -m torch.distributed.launch --nproc_per_node ${PER_NODE_GPU} --node_rank=${RANK} --nnodes=${WORLD_SIZE} --master_addr=${MASTER_HOST} --master_port=${MASTER_PORT} ../run_pre_training.py  \
 RANK=0 WORLD_SIZE=1 MASTER_ADDR=localhost MASTER_PORT=23333 \
 python ../run_pre_training.py \
-  --model_type t5 \
+  --model_type codet5 \
   --add_lang_ids \
   --train_epochs 30 \
-  --config_name ${mnt_dir}/PreViewer/pretrained_models/t5 \
-  --tokenizer_path ${mnt_dir}/PreViewer/pretrained_models/t5 \
-  --model_name_or_path ${mnt_dir}/PreViewer/pretrained_models/t5 \
-  --output_dir ${mnt_dir}/PreViewer/saved_models \
+  --config_name ${mnt_dir}/PreViewer/pretrained_models/codet5 \
+  --tokenizer_path ${mnt_dir}/PreViewer/pretrained_models/codet5 \
+  --model_name_or_path ${mnt_dir}/PreViewer/pretrained_models/codet5 \
+  --output_dir ${mnt_dir}/PreViewer/save_codet5_pretrain \
   --train_path ${mnt_dir}/processed \
   --max_source_length 512 \
   --max_target_length 256 \
@@ -32,5 +32,4 @@ python ../run_pre_training.py \
   --train_steps 150000 \
   --gpu_per_node=${PER_NODE_GPU} \
   --node_index=${RANK} \
-  --seed 2233 \
-  # --from_scratch
+  --seed 2233

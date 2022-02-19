@@ -24,7 +24,6 @@ def add_args(parser):
     )
     parser.add_argument("--add_lang_ids", action="store_true")
     parser.add_argument("--from_scratch", action="store_true")
-    parser.add_argument("--no_cls_head", action="store_true")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--start_epoch", default=0, type=int)
     parser.add_argument("--train_epochs", default=10, type=int)
@@ -151,7 +150,7 @@ def add_args(parser):
         "--mask_rate", default=0.15, type=float, help="The masked rate of input lines.",
     )
     parser.add_argument(
-        "--beam_size", default=10, type=int, help="beam size for beam search"
+        "--beam_size", default=6, type=int, help="beam size for beam search"
     )
     parser.add_argument(
         "--weight_decay", default=0.0, type=float, help="Weight deay if we apply some."

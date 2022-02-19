@@ -145,23 +145,6 @@ def eval_bleu_epoch(args, eval_dataloader, model, tokenizer):
             f1.write(tgt.strip() + '\n')
             f2.write(src.strip() + '\n')
     return
-    # time.sleep(10)
-    # pred_file = open(output_fn).readlines()
-    # predictions = [pred.strip() for pred in pred_file]
-    # predictions = [str(i) + "\t" + pred.replace("\t", " ") for (i, pred) in enumerate(predictions)]
-    # new_gold_fn = gold_fn + ".new"
-    # gold_file = open(gold_fn, 'r').readlines()
-    # gold_file = [gold.strip() for gold in gold_file]
-    # gold_file = [str(i) + "\t" + gold.replace("\t", " ") for (i, gold) in enumerate(gold_file)]
-    # open(new_gold_fn, 'w').write('\n'.join(gold_file))
-    # (goldMap, predictionMap) = smooth_bleu.computeMaps(predictions, new_gold_fn)
-    # bleu = round(smooth_bleu.bleuFromMaps(goldMap, predictionMap)[0], 2)
-    # em = np.mean(dev_accs) * 100
-    # result = {'em': em, 'bleu': bleu}
-    # logger.info("***** Eval results *****")
-    # for key in sorted(result.keys()):
-    #     logger.info("  %s = %s", key, str(round(result[key], 4)))
-    # return result
 
 
 def main(args):

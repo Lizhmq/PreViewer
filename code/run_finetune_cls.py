@@ -8,7 +8,7 @@ from tqdm import tqdm
 import multiprocessing
 import time
 from itertools import cycle
-from torch.utils.data import DataLoader, RandomSampler
+from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 from torch.utils.data import ConcatDataset
 from torch.utils.data.distributed import DistributedSampler
 from transformers import AdamW, get_linear_schedule_with_warmup
@@ -17,6 +17,7 @@ from configs import add_args, set_seed, set_dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 from utils import CommentClsDataset
+from sklearn.metrics import f1_score, accuracy_score
 
 
 logging.basicConfig(
@@ -27,40 +28,48 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def get_loaders(data_list, args, tokenizer, pool):
+def get_loaders(data_files, args, tokenizer, pool, eval=False):
     def fn(features):
         return features
-    local_rank = args.local_rank
     global_rank = args.global_rank
-    world_size = args.world_size
-    assert len(data_list) > 0, "Empty datalist."
-    each_len = len(data_list) // world_size
-    data_list = data_list[: each_len * world_size]
-    random.shuffle(data_list)       # this will shuffle data chunks
-    curlist = data_list[global_rank * each_len : (global_rank + 1) * each_len]
-    concat_len = 2
-    split_list = [curlist[i:i + concat_len] for i in range(0, len(curlist), concat_len)]
-    for data_files in split_list:
-        logger.info(f"Start data files {data_files}.")
-        # add concat dataset
-        datasets = [CommentClsDataset(tokenizer, pool, args, data_file) for data_file in data_files]
-        data_len = sum(len(dataset) for dataset in datasets)        # truncate to the same length
-        data_len = torch.tensor(data_len).to(local_rank)            # to keep same training size for different gpus
-        if world_size > 1:
-            dist.all_reduce(data_len, op=dist.ReduceOp.MIN)
-        data_len = data_len.item()
-        prev_len = sum(len(dataset) for dataset in datasets[:-1])
-        last_len = data_len - prev_len
+    for data_file in data_files:
+        dataset = CommentClsDataset(tokenizer, pool, args, data_file)
+        data_len = len(dataset)
         if global_rank == 0:
             logger.info(f"Data length: {data_len}.")
-        logger.info(f"Rank: {global_rank}: drop {len(datasets[-1]) - last_len} samples.")
-        datasets[-1].reset_len(last_len)
-
-        dataset = ConcatDataset(datasets)
-        sampler = RandomSampler(dataset)
+        if eval:
+            sampler = SequentialSampler(dataset)
+        else:
+            sampler = DistributedSampler(dataset)
         dataloader = DataLoader(dataset, sampler=sampler, batch_size=args.train_batch_size, num_workers=args.cpu_count, collate_fn=fn)
-        logger.info(f"Finish data files {data_files}.")
         yield dataset, sampler, dataloader
+
+
+def eval_epoch_acc(args, eval_dataloader, model, tokenizer):
+    # Start evaluating model
+    logger.info("  " + "***** Running acc evaluation *****")
+    logger.info("  Batch size = %d", args.eval_batch_size)
+
+    model.eval()
+    local_rank = 0
+    pred, gold = [], []
+    with torch.no_grad():
+        for step, examples in enumerate(tqdm(eval_dataloader), 1):
+            source_ids = torch.tensor(
+                [ex.source_ids for ex in examples], dtype=torch.long
+            ).to(local_rank)
+            source_mask = source_ids.ne(tokenizer.pad_id)
+            logits = model(
+                cls=True,
+                input_ids=source_ids,
+                labels=None,
+                attention_mask=source_mask
+            )
+            prediction = torch.argmax(logits, dim=-1).cpu().numpy()
+            pred.extend(prediction)
+            gold.extend([ex.y for ex in examples])
+    acc = accuracy_score(gold, pred)
+    return acc
 
 
 def save_model(model, optimizer, scheduler, output_dir, config):
@@ -108,15 +117,6 @@ def main(args):
     model = DDP(model.cuda(), device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
     pool = multiprocessing.Pool(args.cpu_count)
 
-    if args.debug:
-        data_list = [os.path.join(args.train_path, f"ruby_gen.jsonl")]
-        args.save_steps = 50
-        args.log_steps = 5
-        args.train_steps = 200
-    else:
-        # bchunk for big chunks, chunk for small chunks
-        files = sorted([file for file in os.listdir(args.train_path) if file.startswith("clschunk_train") and file.endswith(".jsonl")])
-        data_list = [os.path.join(args.train_path, file) for file in files]
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ["bias", "LayerNorm.weight"]
     optimizer_grouped_parameters = [
@@ -163,18 +163,27 @@ def main(args):
 
     global_step = 0
     save_steps = args.save_steps
-
+    train_file = args.train_filename
+    valid_file = args.dev_filename
+    train_files = [file for file in os.listdir(train_file) if file.startswith("cls-train-chunk") and file.endswith(".jsonl")]
+    valid_files = [file for file in os.listdir(valid_file) if file.startswith("cls-valid") and file.endswith(".jsonl")]
+    logger.warning("Train files: %s", train_files)
+    assert len(valid_files) == 1
+    random.shuffle(train_files)
+    train_files = [os.path.join(train_file, file) for file in train_files]
+    valid_files = [os.path.join(valid_file, valid_files[0])]
+    # acc = eval_epoch_acc(args, valid_dataloader, model, tokenizer)
+    # logger.info("Initial acc: %s", acc)
     for epoch in range(1, args.train_epochs + 1):
         # set seed for reproducible data split
         save_seed = args.seed
         args.seed += epoch
         set_seed(args)
         args.seed = save_seed
-        data_tuples = get_loaders(data_list, args, tokenizer, pool)        # WARNING: this is a iterator, to save memory
         model.train()
         nb_tr_examples, nb_tr_steps, tr_loss = 0, 0, 0
-        for _, _, dataloader in data_tuples:
-            for step, examples in enumerate(dataloader, 1):
+        for _, _, train_dataloader in get_loaders(train_files, args, tokenizer, pool):        # WARNING: this is a iterator, to save memory
+            for step, examples in enumerate(train_dataloader, 1):
                 if step == 1:
                     ex = examples[0]
                     logger.info(f"batch size: {len(examples)}")
@@ -222,9 +231,11 @@ def main(args):
                                 round(train_loss, 3),
                             )
                         )
-                if global_step == args.train_steps and args.global_rank == 0:
+                if args.global_rank == 0 and global_step == args.train_steps:
                     # end training
-                    output_dir = os.path.join(args.output_dir, "checkpoints-last")
+                    _, _, valid_dataloader = next(get_loaders(valid_files, args, tokenizer, pool, eval=True))
+                    acc = eval_epoch_acc(args, valid_dataloader, model, tokenizer)
+                    output_dir = os.path.join(args.output_dir, "checkpoints-last" + "-" + str(acc))
                     save_model(model, optimizer, scheduler, output_dir, config)
                     logger.info(f"Reach max steps {args.train_steps}.")
                     time.sleep(5)
@@ -232,8 +243,9 @@ def main(args):
                 if args.global_rank == 0 and \
                         global_step % save_steps == 0 and \
                         nb_tr_steps % args.gradient_accumulation_steps == 0:
-                    # eval_loss = eval(args, model)
-                    output_dir = os.path.join(args.output_dir, "checkpoints-" + str(global_step))
+                    _, _, valid_dataloader = next(get_loaders(valid_files, args, tokenizer, pool, eval=True))
+                    acc = eval_epoch_acc(args, valid_dataloader, model, tokenizer)
+                    output_dir = os.path.join(args.output_dir, "checkpoints-" + str(global_step) + "-" + str(acc))
                     save_model(model, optimizer, scheduler, output_dir, config)
                     logger.info(
                         "Save the {}-step model and optimizer into {}".format(
@@ -241,13 +253,6 @@ def main(args):
                         )
                     )
                     time.sleep(5)
-    # reach max epochs, not max steps
-    if args.global_rank == 0:
-        # Save the final checkpoint
-        output_dir = os.path.join(args.output_dir, "checkpoints-last")
-        save_model(model, optimizer, scheduler, output_dir, config)
-        logger.info("Save the trained model and optimizer into {}".format(output_dir))
-        time.sleep(5)
 
 
 if __name__ == "__main__":

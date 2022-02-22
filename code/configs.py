@@ -115,6 +115,9 @@ def add_args(parser):
         "--do_test", action="store_true", help="Whether to run eval on the dev set."
     )
     parser.add_argument(
+        "--raw_input", action="store_true", help="Whether to use simple input format (set for baselines)."
+    )
+    parser.add_argument(
         "--do_lower_case",
         action="store_true",
         help="Set this flag if you are using an uncased model.",

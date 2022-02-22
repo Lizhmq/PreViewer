@@ -1,4 +1,4 @@
-import os
+import os, json
 import torch
 import logging
 import argparse
@@ -15,8 +15,8 @@ from models import build_or_load_gen_model
 from configs import add_args, set_seed, set_dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
-from utils import CommentClsDataset
-from sklearn.metrics import classification_report
+from utils import CommentGenDataset
+from evaluator.smooth_bleu import bleu_fromstr
 
 
 logging.basicConfig(
@@ -32,46 +32,53 @@ def get_loader(data_file, args, tokenizer, pool):
         return features
     logger.info(f"Start data file {data_file}.")
     # add concat dataset
-    dataset = CommentClsDataset(tokenizer, pool, args, data_file)
-    # sampler = DistributedSampler(dataset)
-    # sampler = SequentialSampler(dataset)
-    sampler = RandomSampler(dataset)
+    dataset = CommentGenDataset(tokenizer, pool, args, data_file)
+    sampler = SequentialSampler(dataset)
     dataloader = DataLoader(dataset, sampler=sampler, batch_size=args.eval_batch_size, num_workers=args.cpu_count, collate_fn=fn)
     logger.info(f"Finish data files {data_file}.")
     return dataset, sampler, dataloader
 
 
-def eval_epoch_acc(args, eval_dataloader, model, tokenizer):
-    # Start evaluating model
-    logger.info("  " + "***** Running acc evaluation *****")
+def eval_epoch_bleu(args, eval_dataloader, model, tokenizer):
+    logger.info(f"  ***** Running bleu evaluation on {args.eval_file} *****")
     logger.info("  Batch size = %d", args.eval_batch_size)
-
     model.eval()
-    local_rank = 0
-    pred, gold = [], []
-    with torch.no_grad():
-        for step, examples in enumerate(tqdm(eval_dataloader), 1):
-            if step == 1:
-                ex = examples[0]
-                logger.info(f"batch size: {len(examples)}")
-                logger.info(f"example source: {tokenizer.convert_ids_to_tokens(ex.source_ids)}")
-                logger.info(f"example target: {ex.y}")
-            source_ids = torch.tensor(
-                [ex.source_ids for ex in examples], dtype=torch.long
-            ).to(local_rank)
-            source_mask = source_ids.ne(tokenizer.pad_id)
-            logits = model(
-                cls=True,
-                input_ids=source_ids,
-                labels=None,
-                attention_mask=source_mask
-            )
-            prediction = torch.argmax(logits, dim=-1).cpu().numpy()
-            pred.extend(prediction)
-            gold.extend([ex.y for ex in examples])
-    logger.info("\n" + classification_report(gold, pred, digits=4))
-    logger.info(f"Target positive percentage: {sum(gold) / len(gold)}")
-    return
+    if hasattr(model, "module"):
+        model = model.module
+    pred_ids, ex_ids = [], []
+    for step, examples in enumerate(eval_dataloader, 1):
+        source_ids = torch.tensor(
+            [ex.source_ids for ex in examples], dtype=torch.long
+        ).to(args.local_rank)
+        ids = [ex.example_id for ex in examples]
+        source_mask = source_ids.ne(tokenizer.pad_id)
+        preds = model.generate(source_ids,
+                            attention_mask=source_mask,
+                            use_cache=True,
+                            num_beams=args.beam_size,
+                            early_stopping=True,
+                            max_length=args.max_target_length)
+        top_preds = list(preds.cpu().numpy())
+        pred_ids.extend(top_preds)
+        if step == 100:
+            break
+    pred_nls = [tokenizer.decode(id, skip_special_tokens=True, clean_up_tokenization_spaces=False) for id in pred_ids]
+    valid_file = args.eval_file
+    golds = []
+    with open(valid_file, "r") as f:
+        for line in f:
+            golds.append(json.loads(line)["msg"])
+    golds = golds[:len(pred_nls)]
+    with open(os.path.join(args.model_name_or_path, "preds.txt"), "w") as f:
+        for pred in pred_nls:
+            f.write(pred.strip() + "\n")
+    with open(os.path.join(args.model_name_or_path, "golds.txt"), "w") as f:
+        for gold in golds:
+            f.write(gold.strip() + "\n")
+    # logger.warning(f"Golds: {golds}")
+    # logger.warning(f"Preds: {pred_nls}")
+    bleu = bleu_fromstr(pred_nls, golds)
+    return bleu
 
 
 def main(args):
@@ -94,7 +101,8 @@ def main(args):
     set_seed(args)
     _, _, dataloader = get_loader(data_file, args, tokenizer, pool)        # WARNING: this is a iterator, to save memory
     model.eval()
-    eval_epoch_acc(args, dataloader, model, tokenizer)
+    bleu = eval_epoch_bleu(args, dataloader, model, tokenizer)
+    logger.warning(f"BLEU: {bleu}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

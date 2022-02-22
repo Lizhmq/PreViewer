@@ -1,4 +1,3 @@
-from calendar import weekday
 import os
 import torch.nn as nn
 import torch
@@ -115,6 +114,7 @@ class ReviewerModel(T5ForConditionalGeneration):
         )
         hidden_states = encoder_outputs[0]
         first_hidden = hidden_states[:, 0, :]
+        first_hidden = nn.Dropout(0.3)(first_hidden)
         logits = self.cls_head(first_hidden)
         loss_fct = CrossEntropyLoss()
         if labels != None:

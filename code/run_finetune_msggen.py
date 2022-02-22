@@ -16,7 +16,7 @@ from models import build_or_load_gen_model
 from configs import add_args, set_seed, set_dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
-from utils import CommentGenDataset
+from utils import CommentGenDataset, SimpleGenDataset
 from evaluator.smooth_bleu import bleu_fromstr
 
 
@@ -32,7 +32,10 @@ def get_loader(data_file, args, tokenizer, pool, eval=False):
     def fn(features):
         return features
     global_rank = args.global_rank
-    dataset = CommentGenDataset(tokenizer, pool, args, data_file)
+    if args.raw_input:
+        dataset = SimpleGenDataset(tokenizer, pool, args, data_file)
+    else:
+        dataset = CommentGenDataset(tokenizer, pool, args, data_file)
     data_len = len(dataset)
     if global_rank == 0:
         logger.info(f"Data length: {data_len}.")
@@ -51,7 +54,7 @@ def eval_bleu_epoch(args, eval_dataloader, model, tokenizer):
     if hasattr(model, "module"):
         model = model.module
     pred_ids, ex_ids = [], []
-    for step, examples in tqdm(enumerate(eval_dataloader, 1)):
+    for step, examples in enumerate(eval_dataloader, 1):
         source_ids = torch.tensor(
             [ex.source_ids for ex in examples], dtype=torch.long
         ).to(args.local_rank)
@@ -65,8 +68,6 @@ def eval_bleu_epoch(args, eval_dataloader, model, tokenizer):
                             max_length=args.max_target_length)
         top_preds = list(preds.cpu().numpy())
         pred_ids.extend(top_preds)
-        if step == 4:
-            break
     pred_nls = [tokenizer.decode(id, skip_special_tokens=True, clean_up_tokenization_spaces=False) for id in pred_ids]
     valid_file = args.dev_filename
     golds = []
@@ -74,6 +75,12 @@ def eval_bleu_epoch(args, eval_dataloader, model, tokenizer):
         for line in f:
             golds.append(json.loads(line)["msg"])
     golds = golds[:len(pred_nls)]
+    with open(os.path.join(args.model_name_or_path, "preds.txt"), "w") as f:
+        for pred in pred_nls:
+            f.write(pred.strip() + "\n")
+    with open(os.path.join(args.model_name_or_path, "golds.txt"), "w") as f:
+        for gold in golds:
+            f.write(gold.strip() + "\n")
     # logger.warning(f"Golds: {golds}")
     # logger.warning(f"Preds: {pred_nls}")
     bleu = bleu_fromstr(pred_nls, golds)

@@ -151,7 +151,6 @@ class TextDataset(Dataset):
         example.msg = self.encode_remove(tokenizer, example.msg, args)
         return example
 
-    # TODO: redistribute probability
     def convert_examples_to_features(self, item):
         example, _, _ = item
         if len(example.msg) > 0:
@@ -378,6 +377,103 @@ class CommentClsDataset(TextDataset):
         return ClsFeatures(tmpfeature.example_id, tmpfeature.source_ids, example.y)
 
 
+class SimpleClsDataset(TextDataset):
+    def __init__(self, tokenizer, pool, args, file_path, samplenum=-1):
+        self.tokenizer = tokenizer
+        if isinstance(tokenizer, MyTokenizer):
+            tokenizer_type = "mytok"
+        elif isinstance(tokenizer, T5Tokenizer):
+            tokenizer_type = ""
+        elif isinstance(tokenizer, RobertaTokenizer):
+            tokenizer_type = "rb"
+        else:
+            tokenizer_type = "unk"
+        savep = file_path.replace(".jsonl", tokenizer_type + ".simpexps")
+        if os.path.exists(savep):
+            logger.info("Loading examples from {}".format(savep))
+            self.feats = torch.load(savep)
+        else:
+            logger.info("Reading examples from {}".format(file_path))
+            examples = read_review_examples(file_path, samplenum, tokenizer)
+            logger.info(f"Tokenize examples: {file_path}")
+            self.feats = pool.map(self.convert_examples_to_features, \
+                [(example, tokenizer, args) for example in examples])
+            torch.save(self.feats, savep)
+
+    def convert_examples_to_features(self, item):
+        example, tokenizer, args = item
+        example.input_lines = example.input.split("<e0>")
+        labels_l = len(example.labels)
+        example.input_lines = example.input_lines[:labels_l]
+        for i in range(len(example.input_lines)):
+            if example.labels[i] == 1:
+                example.input_lines[i] = "+ " + example.input_lines[i]
+            elif example.labels[i] == 0:
+                example.input_lines[i] = "- " + example.input_lines[i]
+        example.input = " ".join(example.input_lines)
+        input_ids = self.encode_remove(tokenizer, example.input, args)
+        exceed_l = len(input_ids) - args.max_source_length + 2
+        if exceed_l > 0:
+            halfexl = (exceed_l + 1) // 2
+            input_ids = input_ids[halfexl:-halfexl]
+        source_ids = input_ids[:args.max_source_length - 2]
+        source_ids = [tokenizer.bos_id] + source_ids + [tokenizer.eos_id]
+        pad_len = args.max_source_length - len(source_ids)
+        source_ids += [tokenizer.pad_id] * pad_len
+        example_id = example.idx
+        y = example.y
+        return ClsFeatures(example_id, source_ids, y)
+
+
+class SimpleGenDataset(TextDataset):
+    def __init__(self, tokenizer, pool, args, file_path, samplenum=-1):
+        self.tokenizer = tokenizer
+        if isinstance(tokenizer, MyTokenizer):
+            tokenizer_type = "mytok"
+        elif isinstance(tokenizer, T5Tokenizer):
+            tokenizer_type = ""
+        elif isinstance(tokenizer, RobertaTokenizer):
+            tokenizer_type = "rb"
+        else:
+            tokenizer_type = "unk"
+        savep = file_path.replace(".jsonl", tokenizer_type + ".simpgenexps")
+        if os.path.exists(savep):
+            logger.info("Loading examples from {}".format(savep))
+            self.feats = torch.load(savep)
+        else:
+            logger.info("Reading examples from {}".format(file_path))
+            examples = read_review_examples(file_path, samplenum, tokenizer)
+            logger.info(f"Tokenize examples: {file_path}")
+            self.feats = pool.map(self.convert_examples_to_features, \
+                [(example, tokenizer, args) for example in examples])
+            torch.save(self.feats, savep)
+
+    def convert_examples_to_features(self, item):
+        example, tokenizer, args = item
+        example.input_lines = example.input.split("<e0>")
+        labels_l = len(example.labels)
+        example.input_lines = example.input_lines[:labels_l]
+        for i in range(len(example.input_lines)):
+            if example.labels[i] == 1:
+                example.input_lines[i] = "+ " + example.input_lines[i]
+            elif example.labels[i] == 0:
+                example.input_lines[i] = "- " + example.input_lines[i]
+        example.input = " ".join(example.input_lines)
+        input_ids = self.encode_remove(tokenizer, example.input, args)
+        exceed_l = len(input_ids) - args.max_source_length + 2
+        if exceed_l > 0:
+            halfexl = (exceed_l + 1) // 2
+            input_ids = input_ids[halfexl:-halfexl]
+        source_ids = input_ids
+        target_ids = []
+        target_ids.append(tokenizer.msg_id)
+        example.msg = self.encode_remove(tokenizer, example.msg, args)
+        target_ids.extend(example.msg)
+        source_ids, target_ids = self.pad_assert(source_ids, target_ids, args, tokenizer)
+        input_labels = [-100] * len(source_ids)
+        return ReviewFeatures(example.idx, source_ids, input_labels, target_ids, type="genmsg")
+
+
 class InputFeatures(object):
     """A single training/test features for a example."""
 
@@ -489,7 +585,7 @@ class ReviewExample(object):
         difflines = self.diff.split("\n")
         first_line = difflines[0]
         difflines = difflines[1:]
-        difflines = [line for line in difflines if line != "\ No newline at end of file"]
+        difflines = [line for line in difflines if line != r"\ No newline at end of file"]
         regex = r"@@ -(\d+),(\d+) \+(\d+),(\d+) @@"
         matchres = re.match(regex, first_line)
         if matchres:

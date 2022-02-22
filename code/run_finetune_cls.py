@@ -16,7 +16,7 @@ from models import build_or_load_gen_model
 from configs import add_args, set_seed, set_dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
-from utils import CommentClsDataset
+from utils import CommentClsDataset, SimpleClsDataset
 from sklearn.metrics import f1_score, accuracy_score
 
 
@@ -33,7 +33,10 @@ def get_loaders(data_files, args, tokenizer, pool, eval=False):
         return features
     global_rank = args.global_rank
     for data_file in data_files:
-        dataset = CommentClsDataset(tokenizer, pool, args, data_file)
+        if args.raw_input:
+            dataset = SimpleClsDataset(tokenizer, pool, args, data_file)
+        else:
+            dataset = CommentClsDataset(tokenizer, pool, args, data_file)
         data_len = len(dataset)
         if global_rank == 0:
             logger.info(f"Data length: {data_len}.")
@@ -41,7 +44,8 @@ def get_loaders(data_files, args, tokenizer, pool, eval=False):
             sampler = SequentialSampler(dataset)
         else:
             sampler = DistributedSampler(dataset)
-        dataloader = DataLoader(dataset, sampler=sampler, batch_size=args.train_batch_size, num_workers=args.cpu_count, collate_fn=fn)
+        dataloader = DataLoader(dataset, sampler=sampler, batch_size=args.train_batch_size if not eval else args.eval_batch_size, \
+                                num_workers=args.cpu_count, collate_fn=fn)
         yield dataset, sampler, dataloader
 
 
@@ -54,7 +58,7 @@ def eval_epoch_acc(args, eval_dataloader, model, tokenizer):
     local_rank = 0
     pred, gold = [], []
     with torch.no_grad():
-        for step, examples in enumerate(tqdm(eval_dataloader), 1):
+        for step, examples in enumerate(eval_dataloader, 1):
             source_ids = torch.tensor(
                 [ex.source_ids for ex in examples], dtype=torch.long
             ).to(local_rank)
@@ -235,7 +239,7 @@ def main(args):
                     # end training
                     _, _, valid_dataloader = next(get_loaders(valid_files, args, tokenizer, pool, eval=True))
                     acc = eval_epoch_acc(args, valid_dataloader, model, tokenizer)
-                    output_dir = os.path.join(args.output_dir, "checkpoints-last" + "-" + str(acc))
+                    output_dir = os.path.join(args.output_dir, "checkpoints-last" + "-" + str(acc)[:5])
                     save_model(model, optimizer, scheduler, output_dir, config)
                     logger.info(f"Reach max steps {args.train_steps}.")
                     time.sleep(5)
@@ -245,7 +249,7 @@ def main(args):
                         nb_tr_steps % args.gradient_accumulation_steps == 0:
                     _, _, valid_dataloader = next(get_loaders(valid_files, args, tokenizer, pool, eval=True))
                     acc = eval_epoch_acc(args, valid_dataloader, model, tokenizer)
-                    output_dir = os.path.join(args.output_dir, "checkpoints-" + str(global_step) + "-" + str(acc))
+                    output_dir = os.path.join(args.output_dir, "checkpoints-" + str(global_step) + "-" + str(acc)[:5])
                     save_model(model, optimizer, scheduler, output_dir, config)
                     logger.info(
                         "Save the {}-step model and optimizer into {}".format(

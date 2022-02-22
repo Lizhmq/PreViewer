@@ -18,13 +18,13 @@ NCCL_DEBUG=INFO
 # NCCL_DEBUG=INFO
 
 python -m torch.distributed.launch --nproc_per_node ${PER_NODE_GPU} --node_rank=${RANK} --nnodes=${NODES} --master_addr=${MASTER_HOST} --master_port=${MASTER_PORT} ../run_finetune_msggen.py  \
-  --model_type t5 \
+  --model_type codet5 \
   --add_lang_ids \
   --train_epochs 30 \
-  --config_name ${mnt_dir}/Tufano/pytorch \
-  --tokenizer_path ${mnt_dir}/Tufano/pytorch/TokenizerModel.model \
-  --model_name_or_path ${mnt_dir}/Tufano/pytorch \
-  --output_dir ${mnt_dir}/PreViewer/saved_models_gen_tufano \
+  --config_name ${mnt_dir}/PreViewer/saved_models_codet5_shuai/save_codet5/checkpoints-245000-3.97 \
+  --tokenizer_path ${mnt_dir}/PreViewer/pretrained_models/codet5 \
+  --model_name_or_path ${mnt_dir}/PreViewer/saved_models_codet5_shuai/save_codet5/checkpoints-245000-3.97 \
+  --output_dir ${mnt_dir}/PreViewer/saved_models_cls_shuai_simple \
   --train_filename ${mnt_dir}/Processor/data/msg-train.jsonl \
   --dev_filename ${mnt_dir}/Processor/data/msg-valid.jsonl \
   --max_source_length 512 \
@@ -33,9 +33,30 @@ python -m torch.distributed.launch --nproc_per_node ${PER_NODE_GPU} --node_rank=
   --learning_rate 3e-4 \
   --gradient_accumulation_steps 6 \
   --mask_rate 0.15 \
-  --save_steps 2000 \
+  --save_steps 1800 \
   --log_steps 100 \
   --train_steps 60000 \
   --gpu_per_node=${PER_NODE_GPU} \
   --node_index=${RANK} \
-  --seed 2233
+  --seed 2233 \
+  --raw_input
+
+
+# --model_type t5 \
+# --add_lang_ids \
+# --train_epochs 30 \
+#  --config_name ${mnt_dir}/Tufano/pytorch \
+#  --tokenizer_path ${mnt_dir}/Tufano/pytorch/TokenizerModel.model \
+#  --model_name_or_path ${mnt_dir}/Tufano/pytorch \
+#  --output_dir ${mnt_dir}/PreViewer/saved_models_gen_tufano_simple \
+
+
+# --config_name ${mnt_dir}/PreViewer/pretrained_models/codet5 \
+# --tokenizer_path ${mnt_dir}/PreViewer/pretrained_models/codet5 \
+# --model_name_or_path ${mnt_dir}/PreViewer/pretrained_models/codet5 \
+# --output_dir ${mnt_dir}/PreViewer/saved_models_cls_codet5_simple \
+
+  # --config_name ${mnt_dir}/PreViewer/saved_models_codet5_shuai/save_codet5/checkpoints-245000-3.97 \
+  # --tokenizer_path ${mnt_dir}/PreViewer/pretrained_models/codet5 \
+  # --model_name_or_path ${mnt_dir}/PreViewer/saved_models_codet5_shuai/save_codet5/checkpoints-245000-3.97 \
+  # --output_dir ${mnt_dir}/PreViewer/saved_models_cls_shuai_simple \

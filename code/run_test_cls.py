@@ -15,7 +15,7 @@ from models import build_or_load_gen_model
 from configs import add_args, set_seed, set_dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
-from utils import CommentClsDataset
+from utils import CommentClsDataset, SimpleClsDataset
 from sklearn.metrics import classification_report
 
 
@@ -31,8 +31,10 @@ def get_loader(data_file, args, tokenizer, pool):
     def fn(features):
         return features
     logger.info(f"Start data file {data_file}.")
-    # add concat dataset
-    dataset = CommentClsDataset(tokenizer, pool, args, data_file)
+    if args.raw_input:
+        dataset = SimpleClsDataset(tokenizer, pool, args, data_file)
+    else:
+        dataset = CommentClsDataset(tokenizer, pool, args, data_file)
     # sampler = DistributedSampler(dataset)
     # sampler = SequentialSampler(dataset)
     sampler = RandomSampler(dataset)

@@ -5,7 +5,7 @@ mnt_dir="/home/v-zhuoli1/lzzz"
 # MASTER_HOST=${MASTER_IP} && echo MASTER_HOST: ${MASTER_HOST}
 # MASTER_PORT=${MASTER_PORT} && echo MASTER_PORT: ${MASTER_PORT}
 # RANK=${OMPI_COMM_WORLD_RANK} && echo RANK: ${RANK}
-# PER_NODE_GPU=2 && echo PER_NODE_GPU: ${PER_NODE_GPU}
+# PER_NODE_GPU=1 && echo PER_NODE_GPU: ${PER_NODE_GPU}
 # NODES=1 && echo NODES: ${NODES}
 # NCCL_DEBUG=INFO
 
@@ -21,10 +21,10 @@ python -m torch.distributed.launch --nproc_per_node ${PER_NODE_GPU} --node_rank=
   --model_type codet5 \
   --add_lang_ids \
   --train_epochs 30 \
-  --config_name ${mnt_dir}/PreViewer/saved_models_gen_codet5_shuai/checkpoints-54000-5.11 \
+  --config_name ${mnt_dir}/PreViewer/saved_models_gen_shuai/checkpoints-7200-4.09 \
   --tokenizer_path ${mnt_dir}/PreViewer/pretrained_models/codet5 \
-  --model_name_or_path ${mnt_dir}/PreViewer/saved_models_gen_codet5_shuai/checkpoints-54000-5.11 \
-  --load_model_path ${mnt_dir}/PreViewer/saved_models_gen_codet5_shuai/checkpoints-54000-5.11 \
+  --model_name_or_path ${mnt_dir}/PreViewer/saved_models_gen_shuai/checkpoints-7200-4.09 \
+  --load_model_path ${mnt_dir}/PreViewer/saved_models_gen_shuai/checkpoints-7200-4.09 \
   --output_dir ${mnt_dir}/PreViewer/empty \
   --eval_file ${mnt_dir}/Processor/data/msg-test.jsonl \
   --max_source_length 512 \
@@ -38,10 +38,58 @@ python -m torch.distributed.launch --nproc_per_node ${PER_NODE_GPU} --node_rank=
   --gpu_per_node=${PER_NODE_GPU} \
   --node_index=${RANK} \
   --seed 2233 \
+
+
+python -m torch.distributed.launch --nproc_per_node ${PER_NODE_GPU} --node_rank=${RANK} --nnodes=${NODES} --master_addr=${MASTER_HOST} --master_port=${MASTER_PORT} ../run_test_gen.py  \
+  --model_type codet5 \
+  --add_lang_ids \
+  --train_epochs 30 \
+  --config_name ${mnt_dir}/PreViewer/saved_models_gen_codet5_simple/checkpoints-18000-4.14 \
+  --tokenizer_path ${mnt_dir}/PreViewer/pretrained_models/codet5 \
+  --model_name_or_path ${mnt_dir}/PreViewer/saved_models_gen_codet5_simple/checkpoints-18000-4.14 \
+  --load_model_path ${mnt_dir}/PreViewer/saved_models_gen_codet5_simple/checkpoints-18000-4.14 \
+  --output_dir ${mnt_dir}/PreViewer/empty \
+  --eval_file ${mnt_dir}/Processor/data/msg-test.jsonl \
+  --max_source_length 512 \
+  --max_target_length 128 \
+  --eval_batch_size 12 \
+  --mask_rate 0.15 \
+  --save_steps 1800 \
+  --beam_size 10 \
+  --log_steps 100 \
+  --train_steps 120000 \
+  --gpu_per_node=${PER_NODE_GPU} \
+  --node_index=${RANK} \
+  --seed 2233 \
+  --raw_input
   
+
+# python -m torch.distributed.launch --nproc_per_node ${PER_NODE_GPU} --node_rank=${RANK} --nnodes=${NODES} --master_addr=${MASTER_HOST} --master_port=${MASTER_PORT} ../run_test_gen.py  \
+#   --model_type t5 \
+#   --add_lang_ids \
+#   --train_epochs 30 \
+#   --config_name ${mnt_dir}/PreViewer/saved_models_gen_tufano_simple/checkpoints-32400-4.34 \
+#   --tokenizer_path ${mnt_dir}/Tufano/pytorch/TokenizerModel.model \
+#   --model_name_or_path ${mnt_dir}/PreViewer/saved_models_gen_tufano_simple/checkpoints-32400-4.34 \
+#   --load_model_path ${mnt_dir}/PreViewer/saved_models_gen_tufano_simple/checkpoints-32400-4.34 \
+#   --output_dir ${mnt_dir}/PreViewer/empty \
+#   --eval_file ${mnt_dir}/Processor/data/msg-test.jsonl \
+#   --max_source_length 512 \
+#   --max_target_length 128 \
+#   --eval_batch_size 12 \
+#   --mask_rate 0.15 \
+#   --save_steps 1800 \
+#   --beam_size 10 \
+#   --log_steps 100 \
+#   --train_steps 120000 \
+#   --gpu_per_node=${PER_NODE_GPU} \
+#   --node_index=${RANK} \
+#   --seed 2233 \
+#   --raw_input
 
 # ${mnt_dir}/PreViewer/saved_models_codet5_shuai/save_codet5/checkpoints-245000-3.97 \
 # ${mnt_dir}/PreViewer/saved_models_gen_codet5_shuai/checkpoints-2000-7.09 \
 # ${mnt_dir}/Tufano/pytorch \
 # ${mnt_dir}/PreViewer/saved_models_cls_codet5_shuai/checkpoints-4000-0.6830665813060179 \
-# ${mnt_dir}/PreViewer/saved_models_cls_codet5/checkpoints-4000-0.6872599231754162 \
+# ${mnt_dir}/PreViewer/saved_models_gen_shuai/checkpoints-14400-4.26 \
+# ${mnt_dir}/PreViewer/saved_models_gen_tufano/checkpoints-54000-4.14 \

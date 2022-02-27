@@ -20,6 +20,7 @@ The reason for breaking the BLEU computation into three phases cook_refs(), cook
 import sys, math, re, xml.sax.saxutils
 import subprocess
 import os
+import nltk
 
 # Added to bypass NIST-style pre-processing of hyp and ref files -- wade
 nonorm = 0
@@ -161,7 +162,22 @@ def splitPuncts(line):
     return ' '.join(re.findall(r"[\w]+|[^\s\w]", line))
 
 
-def bleu_fromstr(predictions, golds):
+def bleu_fromstr(predictions, golds, rmstop=True):
+    def cleanSent(sent):
+        words = nltk.word_tokenize(sent)
+        sent = " ".join(words)
+        for spec in ["< msg > ", "< s > "]:
+            if sent.startswith(spec):
+                sent = sent[len(spec):]
+        return sent
+    predictions = [cleanSent(p) for p in predictions]
+    # print(predictions[0])
+    golds = [" ".join(nltk.word_tokenize(g)) for g in golds]
+    if rmstop:
+        stopwords = open("stopwords.txt").readlines()
+        stopwords = [stopword.strip() for stopword in stopwords]
+        golds = [" ".join([word for word in ref.split() if word not in stopwords]) for ref in golds]
+        predictions = [" ".join([word for word in hyp.split() if word not in stopwords]) for hyp in predictions]
     predictions = [str(i) + "\t" + pred.replace("\t", " ") for (i, pred) in enumerate(predictions)]
     golds = [str(i) + "\t" + gold.replace("\t", " ") for (i, gold) in enumerate(golds)]
     goldMap, predictionMap = computeMaps(predictions, golds)

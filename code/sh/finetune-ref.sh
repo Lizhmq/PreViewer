@@ -20,18 +20,18 @@ NCCL_DEBUG=INFO
 echo -e "import nltk\nnltk.download('punkt')" > tmp.py
 python tmp.py
 
-python -m torch.distributed.launch --nproc_per_node ${PER_NODE_GPU} --node_rank=${RANK} --nnodes=${NODES} --master_addr=${MASTER_HOST} --master_port=${MASTER_PORT} ../run_finetune_msggen.py  \
+python -m torch.distributed.launch --nproc_per_node ${PER_NODE_GPU} --node_rank=${RANK} --nnodes=${NODES} --master_addr=${MASTER_HOST} --master_port=${MASTER_PORT} ../run_finetune_ref.py  \
   --model_type codet5 \
   --add_lang_ids \
   --train_epochs 30 \
   --config_name ${mnt_dir}/PreViewer/pretrained_models/codet5 \
   --tokenizer_path ${mnt_dir}/PreViewer/pretrained_models/codet5 \
   --model_name_or_path ${mnt_dir}/PreViewer/pretrained_models/codet5 \
-  --output_dir ${mnt_dir}/PreViewer/saved_models_gen_codet5_simple_new \
-  --train_filename ${mnt_dir}/Processor/data/msg-train.jsonl \
-  --dev_filename ${mnt_dir}/Processor/data/msg-valid.jsonl \
-  --max_source_length 512 \
-  --max_target_length 128 \
+  --output_dir ${mnt_dir}/PreViewer/saved_models_ref_codet5_simple \
+  --train_filename ${mnt_dir}/Processor/data/ref-train.jsonl \
+  --dev_filename ${mnt_dir}/Processor/data/ref-valid.jsonl \
+  --max_source_length 200 \
+  --max_target_length 200 \
   --train_batch_size 6 \
   --learning_rate 3e-4 \
   --gradient_accumulation_steps 3 \
@@ -51,7 +51,7 @@ python -m torch.distributed.launch --nproc_per_node ${PER_NODE_GPU} --node_rank=
   # --tokenizer_path ${mnt_dir}/PreViewer/pretrained_models/codet5 \
   # --model_name_or_path ${mnt_dir}/PreViewer/saved_models_codet5_shuai/save_codet5/checkpoints-245000-3.97 \
   # --load_model_path ${mnt_dir}/PreViewer/saved_models_codet5_shuai/save_codet5/checkpoints-245000-3.97 \
-  # --output_dir ${mnt_dir}/PreViewer/saved_models_gen_shuai_new \
+  # --output_dir ${mnt_dir}/PreViewer/saved_models_ref_shuai \
 
   # --model_type t5 \
   # --add_lang_ids \
@@ -59,8 +59,7 @@ python -m torch.distributed.launch --nproc_per_node ${PER_NODE_GPU} --node_rank=
   # --config_name ${mnt_dir}/Tufano/pytorch \
   # --tokenizer_path ${mnt_dir}/Tufano/pytorch/TokenizerModel.model \
   # --model_name_or_path ${mnt_dir}/Tufano/pytorch \
-  # --output_dir ${mnt_dir}/PreViewer/saved_models_gen_tufano_simple_new \
-  # --raw_input
+  # --output_dir ${mnt_dir}/PreViewer/saved_models_ref_tufano \
 
 
   # --model_type codet5 \
@@ -69,5 +68,13 @@ python -m torch.distributed.launch --nproc_per_node ${PER_NODE_GPU} --node_rank=
   # --config_name ${mnt_dir}/PreViewer/pretrained_models/codet5 \
   # --tokenizer_path ${mnt_dir}/PreViewer/pretrained_models/codet5 \
   # --model_name_or_path ${mnt_dir}/PreViewer/pretrained_models/codet5 \
-  # --output_dir ${mnt_dir}/PreViewer/saved_models_gen_codet5_simple_new \
+  # --output_dir ${mnt_dir}/PreViewer/saved_models_ref_codet5 \
+
+  # --model_type codet5 \
+  # --add_lang_ids \
+  # --train_epochs 30 \
+  # --config_name ${mnt_dir}/PreViewer/pretrained_models/codet5 \
+  # --tokenizer_path ${mnt_dir}/PreViewer/pretrained_models/codet5 \
+  # --model_name_or_path ${mnt_dir}/PreViewer/pretrained_models/codet5 \
+  # --output_dir ${mnt_dir}/PreViewer/saved_models_ref_codet5_simple \
   # --raw_input

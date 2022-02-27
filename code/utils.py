@@ -5,7 +5,7 @@ from copy import deepcopy as cp
 from torch.utils.data import Dataset
 from tokenizers import ByteLevelBPETokenizer
 from transformers import T5Tokenizer, RobertaTokenizer
-
+import nltk
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
@@ -57,6 +57,109 @@ class MyTokenizer(object):
 
     def __len__(self):
         return len(self.tokenizer.get_vocab())
+
+
+class RefineFeatures(object):
+    def __init__(self, example_id, source_ids, target_ids):
+        self.example_id = example_id
+        self.source_ids = source_ids
+        self.target_ids = target_ids
+
+class RefineDataset(Dataset):
+    def __init__(self, tokenizer, pool, args, file_path, samplenum=-1):
+        self.tokenizer = tokenizer
+        self.args = args
+        logger.info("Reading examples from {}".format(file_path))
+        examples = [json.loads(line) for line in open(file_path)]
+        for i in range(len(examples)):
+            if "id" not in examples[i]:
+                examples[i]["id"] = i
+        if samplenum > 0:
+            examples = examples[:samplenum]
+        logger.info(f"Tokenize examples: {file_path}")
+        self.feats = pool.map(self.tokenize, \
+            [(example, tokenizer, args) for example in examples])
+        
+    def tokenize(self, item):
+        example, tokenizer, args = item
+        oldlines = example["old"].split("\n")
+        newlines = example["new"].split("\n")
+        oldlines = [line[1:].strip() for line in oldlines]
+        newlines = [line[1:].strip() for line in newlines]
+        oldlines = "\n".join(oldlines)
+        newlines = "\n".join(newlines)
+        oldlines = "<add>" + oldlines.replace("\n", "<add>")
+        newlines = "<add>" + newlines.replace("\n", "<add>")
+        comment = example["comment"]
+        srcids = self.encode_remove(tokenizer, oldlines, args)
+        srcids += [tokenizer.msg_id] + self.encode_remove(tokenizer, comment, args)
+        tgtids = self.encode_remove(tokenizer, newlines, args)
+        srcids, tgtids = self.pad_assert(srcids, tgtids, args, tokenizer)
+        return RefineFeatures(example["id"], srcids, tgtids)
+
+    @staticmethod
+    def process_pred_gold(pred, gold):
+        gold = gold.split("\n")
+        gold = [line[1:].strip() for line in gold]
+        gold = " ".join(gold)
+        pred = " ".join(pred.split()[1:])   # remove start <s>
+        pred = pred.replace("<add> ", "")
+        return pred, gold
+
+    def pad_assert(self, source_ids, target_ids, args, tokenizer):
+        source_ids = source_ids[:args.max_source_length - 2]
+        source_ids = [tokenizer.bos_id] + source_ids + [tokenizer.eos_id]
+        pad_len = args.max_source_length - len(source_ids)
+        source_ids += [tokenizer.pad_id] * pad_len
+        target_ids = target_ids[:args.max_target_length - 2]
+        target_ids = [tokenizer.bos_id] + target_ids + [tokenizer.eos_id]
+        pad_len = args.max_target_length - len(target_ids)
+        target_ids += [tokenizer.pad_id] * pad_len
+        assert len(source_ids) == args.max_source_length, "Not equal length."
+        assert len(target_ids) == args.max_target_length, "Not equal length."
+        return source_ids, target_ids
+
+    def encode_remove(self, tokenizer, text, args):
+        text = tokenizer.encode(text, max_length=args.max_source_length, truncation=True)
+        if type(tokenizer) == T5Tokenizer:
+            return text[:-1]
+        elif type(tokenizer) == RobertaTokenizer:
+            return text[1:-1]
+        elif type(tokenizer) == MyTokenizer:
+            return text
+        else:
+            raise NotImplementedError
+
+    def __len__(self):
+        return len(self.feats)
+
+    def __getitem__(self, i):
+        return self.feats[i]
+
+class SimpleRefineDataset(RefineDataset):
+    def tokenize(self, item):
+        example, tokenizer, args = item
+        oldlines = example["old"].split("\n")
+        newlines = example["new"].split("\n")
+        oldlines = [line[1:].strip() for line in oldlines]
+        newlines = [line[1:].strip() for line in newlines]
+        oldlines = " ".join(oldlines)
+        newlines = " ".join(newlines)
+        comment = example["comment"]
+        srcids = self.encode_remove(tokenizer, oldlines, args)
+        srcids += [tokenizer.msg_id] + self.encode_remove(tokenizer, comment, args)
+        tgtids = self.encode_remove(tokenizer, newlines, args)
+        srcids, tgtids = self.pad_assert(srcids, tgtids, args, tokenizer)
+        return RefineFeatures(example["id"], srcids, tgtids)
+
+    @staticmethod
+    def process_pred_gold(pred, gold):
+        gold = gold.split("\n")
+        gold = [line[1:].strip() for line in gold]
+        gold = " ".join(gold)
+        pred = " ".join(pred.split()[1:])   # remove start <s>
+        return pred, gold
+
 
 
 class TextDataset(Dataset):
@@ -327,6 +430,8 @@ class CommentGenDataset(TextDataset):
         else:
             logger.info("Reading examples from {}".format(file_path))
             examples = read_review_examples(file_path, samplenum, tokenizer)
+            for i in range(len(examples)):
+                examples[i].msg = " ".join(nltk.word_tokenize(examples[i].msg))
             logger.info(f"Tokenize examples: {file_path}")
             examples = pool.map(self.tokenize, \
                 [(example, tokenizer, args) for example in examples])
@@ -443,6 +548,8 @@ class SimpleGenDataset(TextDataset):
         else:
             logger.info("Reading examples from {}".format(file_path))
             examples = read_review_examples(file_path, samplenum, tokenizer)
+            for i in range(len(examples)):
+                examples[i].msg = " ".join(nltk.word_tokenize(examples[i].msg))
             logger.info(f"Tokenize examples: {file_path}")
             self.feats = pool.map(self.convert_examples_to_features, \
                 [(example, tokenizer, args) for example in examples])

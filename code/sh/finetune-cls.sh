@@ -17,6 +17,9 @@ NCCL_DEBUG=INFO
 # NODES=1 && echo NODES: ${NODES}
 # NCCL_DEBUG=INFO
 
+echo -e "import nltk\nnltk.download('punkt')" > tmp.py
+python tmp.py
+
 python -m torch.distributed.launch --nproc_per_node ${PER_NODE_GPU} --node_rank=${RANK} --nnodes=${NODES} --master_addr=${MASTER_HOST} --master_port=${MASTER_PORT} ../run_finetune_cls.py  \
   --model_type codet5 \
   --add_lang_ids \

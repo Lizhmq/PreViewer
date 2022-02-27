@@ -15,7 +15,7 @@ from models import build_or_load_gen_model
 from configs import add_args, set_seed, set_dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
-from utils import CommentGenDataset, SimpleGenDataset
+from utils import RefineDataset, SimpleRefineDataset
 from evaluator.smooth_bleu import bleu_fromstr
 
 
@@ -32,9 +32,9 @@ def get_loader(data_file, args, tokenizer, pool):
         return features
     logger.info(f"Start data file {data_file}.")
     if args.raw_input:
-        dataset = SimpleGenDataset(tokenizer, pool, args, data_file)
+        dataset = SimpleRefineDataset(tokenizer, pool, args, data_file)
     else:
-        dataset = CommentGenDataset(tokenizer, pool, args, data_file)
+        dataset = RefineDataset(tokenizer, pool, args, data_file)
     sampler = SequentialSampler(dataset)
     dataloader = DataLoader(dataset, sampler=sampler, batch_size=args.eval_batch_size, num_workers=args.cpu_count, collate_fn=fn)
     logger.info(f"Finish data files {data_file}.")
@@ -52,7 +52,6 @@ def eval_epoch_bleu(args, eval_dataloader, model, tokenizer):
         source_ids = torch.tensor(
             [ex.source_ids for ex in examples], dtype=torch.long
         ).to(args.local_rank)
-        ids = [ex.example_id for ex in examples]
         source_mask = source_ids.ne(tokenizer.pad_id)
         preds = model.generate(source_ids,
                             attention_mask=source_mask,
@@ -62,15 +61,17 @@ def eval_epoch_bleu(args, eval_dataloader, model, tokenizer):
                             max_length=args.max_target_length)
         top_preds = list(preds.cpu().numpy())
         pred_ids.extend(top_preds)
-        if step == 30:
+        if step == 10:
             break
     pred_nls = [tokenizer.decode(id, skip_special_tokens=True, clean_up_tokenization_spaces=False) for id in pred_ids]
     valid_file = args.eval_file
     golds = []
     with open(valid_file, "r") as f:
         for line in f:
-            golds.append(json.loads(line)["msg"])
+            golds.append(json.loads(line)["new"])
     golds = golds[:len(pred_nls)]
+    for i in range(len(golds)):
+        pred_nls[i], golds[i] = RefineDataset.process_pred_gold(pred_nls[i], golds[i])
     with open(os.path.join(args.model_name_or_path, "preds.txt"), "w", encoding="utf-8") as f:
         for pred in pred_nls:
             f.write(pred.strip() + "\n")
@@ -79,7 +80,7 @@ def eval_epoch_bleu(args, eval_dataloader, model, tokenizer):
             f.write(gold.strip() + "\n")
     # logger.warning(f"Golds: {golds}")
     # logger.warning(f"Preds: {pred_nls}")
-    bleu = bleu_fromstr(pred_nls, golds)
+    bleu = bleu_fromstr(pred_nls, golds, rmstop=False)
     return bleu
 
 

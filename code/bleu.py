@@ -19,8 +19,8 @@ def main():
     print(bleu)
     stopwords = open("stopwords.txt").readlines()
     stopwords = [stopword.strip() for stopword in stopwords]
-    refs = [" ".join([word for word in ref.split() if word not in stopwords]) for ref in refs]
-    hyps = [" ".join([word for word in hyp.split() if word not in stopwords]) for hyp in hyps]
+    refs = [" ".join([word for word in ref.lower().split() if word not in stopwords]) for ref in refs]
+    hyps = [" ".join([word for word in hyp.lower().split() if word not in stopwords]) for hyp in hyps]
     bleu = bleu_fromstr(hyps, refs)
     print(bleu)
 

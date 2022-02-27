@@ -156,11 +156,11 @@ class ReviewerModel(T5ForConditionalGeneration):
             cls_logits = nn.functional.linear(hidden_states, self.encoder.get_input_embeddings().weight)
             # cls_logits = self.cls_head(hidden_states)
         lm_logits = self.lm_head(sequence_output)
-        if decoder_input_ids is not None and input_labels is not None:
+        if decoder_input_ids is not None:
             lm_loss_fct = CrossEntropyLoss(ignore_index=0)      # Warning: PAD_ID should be 0
-            cls_loss_fct = CrossEntropyLoss(ignore_index=-100)
             loss = lm_loss_fct(lm_logits.view(-1, lm_logits.size(-1)), decoder_input_ids.view(-1))
-            if encoder_loss:
+            if encoder_loss and input_labels is not None:
+                cls_loss_fct = CrossEntropyLoss(ignore_index=-100)
                 loss += cls_loss_fct(cls_logits.view(-1, cls_logits.size(-1)), input_labels.view(-1))
             return loss
         return cls_logits, lm_logits

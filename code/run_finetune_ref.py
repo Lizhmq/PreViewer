@@ -16,7 +16,7 @@ from models import build_or_load_gen_model
 from configs import add_args, set_seed, set_dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
-from utils import CommentGenDataset, SimpleGenDataset
+from utils import RefineDataset, SimpleRefineDataset
 from evaluator.smooth_bleu import bleu_fromstr
 
 
@@ -33,9 +33,9 @@ def get_loader(data_file, args, tokenizer, pool, eval=False):
         return features
     global_rank = args.global_rank
     if args.raw_input:
-        dataset = SimpleGenDataset(tokenizer, pool, args, data_file)
+        dataset = SimpleRefineDataset(tokenizer, pool, args, data_file)
     else:
-        dataset = CommentGenDataset(tokenizer, pool, args, data_file)
+        dataset = RefineDataset(tokenizer, pool, args, data_file)
     data_len = len(dataset)
     if global_rank == 0:
         logger.info(f"Data length: {data_len}.")
@@ -58,7 +58,6 @@ def eval_bleu_epoch(args, eval_dataloader, model, tokenizer):
         source_ids = torch.tensor(
             [ex.source_ids for ex in examples], dtype=torch.long
         ).to(args.local_rank)
-        ids = [ex.example_id for ex in examples]
         source_mask = source_ids.ne(tokenizer.pad_id)
         preds = model.generate(source_ids,
                             attention_mask=source_mask,
@@ -73,8 +72,10 @@ def eval_bleu_epoch(args, eval_dataloader, model, tokenizer):
     golds = []
     with open(valid_file, "r") as f:
         for line in f:
-            golds.append(json.loads(line)["msg"])
+            golds.append(json.loads(line)["new"])
     golds = golds[:len(pred_nls)]
+    for i in range(len(golds)):
+        pred_nls[i], golds[i] = RefineDataset.process_pred_gold(pred_nls[i], golds[i])
     with open(os.path.join(args.model_name_or_path, "preds.txt"), "w", encoding="utf-8") as f:
         for pred in pred_nls:
             f.write(pred.strip() + "\n")
@@ -83,7 +84,13 @@ def eval_bleu_epoch(args, eval_dataloader, model, tokenizer):
             f.write(gold.strip() + "\n")
     # logger.warning(f"Golds: {golds}")
     # logger.warning(f"Preds: {pred_nls}")
-    bleu = bleu_fromstr(pred_nls, golds)
+    em = 0
+    for pred, gold in zip(pred_nls, golds):
+        if " ".join(pred.split()) == " ".join(gold.split()):
+            em += 1
+    em = em / len(golds)
+    logger.warning(f"EM: {em}")
+    bleu = bleu_fromstr(pred_nls, golds, rmstop=False)
     return bleu
 
 
@@ -196,7 +203,6 @@ def main(args):
             source_ids = torch.tensor(
                 [ex.source_ids for ex in examples], dtype=torch.long
             ).to(local_rank)
-            source_labels = None
             target_ids = torch.tensor(
                 [ex.target_ids for ex in examples], dtype=torch.long
             ).to(local_rank)
@@ -205,7 +211,7 @@ def main(args):
 
             loss = model(
                 input_ids=source_ids,
-                input_labels=source_labels,
+                input_labels=None,
                 decoder_input_ids=target_ids,
                 attention_mask=source_mask,
                 decoder_attention_mask=target_mask,

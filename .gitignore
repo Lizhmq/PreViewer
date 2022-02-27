@@ -8,3 +8,6 @@ saved*
 *.txt
 *(\.?)amlt*
 pretrained_models
+
+
+!code/stopwords.txt

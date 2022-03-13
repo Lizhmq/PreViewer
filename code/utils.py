@@ -1,5 +1,6 @@
 import re, json
 import os, random
+from pyparsing import line_end
 import torch, logging
 from copy import deepcopy as cp
 from torch.utils.data import Dataset
@@ -430,8 +431,8 @@ class CommentGenDataset(TextDataset):
         else:
             logger.info("Reading examples from {}".format(file_path))
             examples = read_review_examples(file_path, samplenum, tokenizer)
-            for i in range(len(examples)):
-                examples[i].msg = " ".join(nltk.word_tokenize(examples[i].msg))
+            # for i in range(len(examples)):
+            #     examples[i].msg = " ".join(nltk.word_tokenize(examples[i].msg))
             logger.info(f"Tokenize examples: {file_path}")
             examples = pool.map(self.tokenize, \
                 [(example, tokenizer, args) for example in examples])
@@ -547,38 +548,45 @@ class SimpleGenDataset(TextDataset):
             self.feats = torch.load(savep)
         else:
             logger.info("Reading examples from {}".format(file_path))
-            examples = read_review_examples(file_path, samplenum, tokenizer)
-            for i in range(len(examples)):
-                examples[i].msg = " ".join(nltk.word_tokenize(examples[i].msg))
+            data = read_jsonl(file_path)
+            # data = [dic for dic in data if len(dic["patch"].split("\n")) <= 20]
+            for i in range(len(data)):
+                data[i]["idx"] = i
             logger.info(f"Tokenize examples: {file_path}")
-            self.feats = pool.map(self.convert_examples_to_features, \
-                [(example, tokenizer, args) for example in examples])
+            # self.feats = pool.map(self.convert_examples_to_features, \
+            #     [(dic, tokenizer, args) for dic in data])
+            self.feats = [self.convert_examples_to_features((dic, tokenizer, args)) for dic in data]
             torch.save(self.feats, savep)
 
     def convert_examples_to_features(self, item):
-        example, tokenizer, args = item
-        example.input_lines = example.input.split("<e0>")
-        labels_l = len(example.labels)
-        example.input_lines = example.input_lines[:labels_l]
-        for i in range(len(example.input_lines)):
-            if example.labels[i] == 1:
-                example.input_lines[i] = "+ " + example.input_lines[i]
-            elif example.labels[i] == 0:
-                example.input_lines[i] = "- " + example.input_lines[i]
-        example.input = " ".join(example.input_lines)
-        input_ids = self.encode_remove(tokenizer, example.input, args)
-        exceed_l = len(input_ids) - args.max_source_length + 2
-        if exceed_l > 0:
-            halfexl = (exceed_l + 1) // 2
-            input_ids = input_ids[halfexl:-halfexl]
-        source_ids = input_ids
+        dic, tokenizer, args = item
+        diff, msg = dic["patch"], dic["msg"]
+        difflines = diff.split("\n")[1:]        # remove start @@
+        difflines = [line for line in difflines if len(line.strip()) > 0]
+        map_dic = {"-": 0, "+": 1, " ": 2}
+        def f(s):
+            if s in map_dic:
+                return map_dic[s]
+            else:
+                return 2
+        labels = [f(line[0]) for line in difflines]
+        difflines = [line[1:].strip() for line in difflines]
+        inputstr = ""
+        for label, line in zip(labels, difflines):
+            if label == 1:
+                inputstr += "<add>" + line
+            elif label == 0:
+                inputstr += "<del>" + line
+            else:
+                inputstr += "<keep>" + line
+        source_ids = self.encode_remove(tokenizer, inputstr, args)
         target_ids = []
         target_ids.append(tokenizer.msg_id)
-        example.msg = self.encode_remove(tokenizer, example.msg, args)
-        target_ids.extend(example.msg)
+        msg = self.encode_remove(tokenizer, dic["msg"], args)
+        target_ids.extend(msg)
         source_ids, target_ids = self.pad_assert(source_ids, target_ids, args, tokenizer)
         input_labels = [-100] * len(source_ids)
-        return ReviewFeatures(example.idx, source_ids, input_labels, target_ids, type="genmsg")
+        return ReviewFeatures(dic["idx"], source_ids, input_labels, target_ids, type="genmsg")
 
 
 class InputFeatures(object):
@@ -784,3 +792,16 @@ def read_review_examples(filename, data_num=-1, tokenizer=None):
                     break
                 
     return examples
+
+
+def read_jsonl(path):
+    data = []
+    with open(path) as f:
+        for line in f:
+            try:
+                js = json.loads(line.strip())
+            except:
+                print("Error during reading json data.")
+                continue
+            data.append(js)
+    return data

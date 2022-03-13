@@ -163,16 +163,8 @@ def splitPuncts(line):
 
 
 def bleu_fromstr(predictions, golds, rmstop=True):
-    def cleanSent(sent):
-        words = nltk.word_tokenize(sent)
-        sent = " ".join(words)
-        for spec in ["< msg > ", "< s > "]:
-            if sent.startswith(spec):
-                sent = sent[len(spec):]
-        return sent
-    predictions = [cleanSent(p) for p in predictions]
-    # print(predictions[0])
-    golds = [" ".join(nltk.word_tokenize(g)) for g in golds]
+    predictions = [" ".join(nltk.wordpunct_tokenize(predictions[i])) for i in range(len(predictions))]
+    golds = [" ".join(nltk.wordpunct_tokenize(g)) for g in golds]
     if rmstop:
         pypath = os.path.dirname(os.path.realpath(__file__))
         parpath = os.path.join(pypath, os.pardir)

@@ -68,7 +68,13 @@ def eval_bleu_epoch(args, eval_dataloader, model, tokenizer):
                             max_length=args.max_target_length)
         top_preds = list(preds.cpu().numpy())
         pred_ids.extend(top_preds)
-    pred_nls = [tokenizer.decode(id, skip_special_tokens=True, clean_up_tokenization_spaces=False) for id in pred_ids]
+    # [1:] to remove beginning '<msg>'
+    pred_nls = [tokenizer.decode(id[1:], skip_special_tokens=True, clean_up_tokenization_spaces=False) for id in pred_ids]
+    for i in range(len(pred_nls)):
+        chars = "(_)`."
+        for c in chars:
+            pred_nls[i] = pred_nls[i].replace(c, " " + c + " ")
+            pred_nls[i] = " ".join(pred_nls[i].split())
     valid_file = args.dev_filename
     golds = []
     with open(valid_file, "r") as f:
@@ -83,7 +89,7 @@ def eval_bleu_epoch(args, eval_dataloader, model, tokenizer):
             f.write(gold.strip() + "\n")
     # logger.warning(f"Golds: {golds}")
     # logger.warning(f"Preds: {pred_nls}")
-    bleu = bleu_fromstr(pred_nls, golds)
+    bleu = bleu_fromstr(pred_nls, golds, rmstop=False)
     return bleu
 
 

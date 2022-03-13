@@ -24,16 +24,17 @@ python -m torch.distributed.launch --nproc_per_node ${PER_NODE_GPU} --node_rank=
   --model_type codet5 \
   --add_lang_ids \
   --train_epochs 30 \
-  --config_name ${mnt_dir}/PreViewer/saved_models_codet5_shuai/save_codet5/checkpoints-245000-3.97 \
+  --config_name ${mnt_dir}/PreViewer/saved_models_shuai/ablation/save_codet5_no_msg/checkpoints-345000-2.43 \
   --tokenizer_path ${mnt_dir}/PreViewer/pretrained_models/codet5 \
-  --model_name_or_path ${mnt_dir}/PreViewer/saved_models_codet5_shuai/save_codet5/checkpoints-245000-3.97 \
-  --output_dir ${mnt_dir}/PreViewer/saved_models_ref_shuai_scr \
+  --model_name_or_path ${mnt_dir}/PreViewer/saved_models_shuai/ablation/save_codet5_no_msg/checkpoints-345000-2.43 \
+  --load_model_path ${mnt_dir}/PreViewer/saved_models_shuai/ablation/save_codet5_no_msg/checkpoints-345000-2.43 \
+  --output_dir ${mnt_dir}/PreViewer/saved_models_ref_shuai_nomsg \
   --train_filename ${mnt_dir}/Processor/data/ref-train.jsonl \
   --dev_filename ${mnt_dir}/Processor/data/ref-valid.jsonl \
   --max_source_length 200 \
   --max_target_length 200 \
   --train_batch_size 6 \
-  --learning_rate 3e-3 \
+  --learning_rate 3e-4 \
   --gradient_accumulation_steps 3 \
   --mask_rate 0.15 \
   --save_steps 1800 \
@@ -42,39 +43,30 @@ python -m torch.distributed.launch --nproc_per_node ${PER_NODE_GPU} --node_rank=
   --gpu_per_node=${PER_NODE_GPU} \
   --node_index=${RANK} \
   --seed 2233 \
-  --from_scratch \
 
   # --model_type codet5 \
   # --add_lang_ids \
   # --train_epochs 30 \
-  # --config_name ${mnt_dir}/PreViewer/saved_models_codet5_shuai/save_codet5/checkpoints-245000-3.97 \
+  # --config_name ${mnt_dir}/PreViewer/saved_models_shuai/ablation/save_codet5_no_dec/checkpoints-165000-7.05 \
   # --tokenizer_path ${mnt_dir}/PreViewer/pretrained_models/codet5 \
-  # --model_name_or_path ${mnt_dir}/PreViewer/saved_models_codet5_shuai/save_codet5/checkpoints-245000-3.97 \
-  # --load_model_path ${mnt_dir}/PreViewer/saved_models_codet5_shuai/save_codet5/checkpoints-245000-3.97 \
-  # --output_dir ${mnt_dir}/PreViewer/saved_models_ref_shuai \
-
-  # --model_type t5 \
-  # --add_lang_ids \
-  # --train_epochs 30 \
-  # --config_name ${mnt_dir}/Tufano/pytorch \
-  # --tokenizer_path ${mnt_dir}/Tufano/pytorch/TokenizerModel.model \
-  # --model_name_or_path ${mnt_dir}/Tufano/pytorch \
-  # --output_dir ${mnt_dir}/PreViewer/saved_models_ref_tufano \
-
+  # --model_name_or_path ${mnt_dir}/PreViewer/saved_models_shuai/ablation/save_codet5_no_dec/checkpoints-165000-7.05 \
+  # --load_model_path ${mnt_dir}/PreViewer/saved_models_shuai/ablation/save_codet5_no_dec/checkpoints-165000-7.05 \
+  # --output_dir ${mnt_dir}/PreViewer/saved_models_ref_shuai_nodec \
 
   # --model_type codet5 \
   # --add_lang_ids \
   # --train_epochs 30 \
-  # --config_name ${mnt_dir}/PreViewer/pretrained_models/codet5 \
+  # --config_name ${mnt_dir}/PreViewer/saved_models_shuai/ablation/save_codet5_no_enc/checkpoints-205000-3.43 \
   # --tokenizer_path ${mnt_dir}/PreViewer/pretrained_models/codet5 \
-  # --model_name_or_path ${mnt_dir}/PreViewer/pretrained_models/codet5 \
-  # --output_dir ${mnt_dir}/PreViewer/saved_models_ref_codet5 \
+  # --model_name_or_path ${mnt_dir}/PreViewer/saved_models_shuai/ablation/save_codet5_no_enc/checkpoints-205000-3.43 \
+  # --load_model_path ${mnt_dir}/PreViewer/saved_models_shuai/ablation/save_codet5_no_enc/checkpoints-205000-3.43 \
+  # --output_dir ${mnt_dir}/PreViewer/saved_models_ref_shuai_noenc \
 
   # --model_type codet5 \
   # --add_lang_ids \
   # --train_epochs 30 \
-  # --config_name ${mnt_dir}/PreViewer/pretrained_models/codet5 \
+  # --config_name ${mnt_dir}/PreViewer/saved_models_shuai/ablation/save_codet5_no_msg/checkpoints-345000-2.43 \
   # --tokenizer_path ${mnt_dir}/PreViewer/pretrained_models/codet5 \
-  # --model_name_or_path ${mnt_dir}/PreViewer/pretrained_models/codet5 \
-  # --output_dir ${mnt_dir}/PreViewer/saved_models_ref_codet5_simple \
-  # --raw_input
+  # --model_name_or_path ${mnt_dir}/PreViewer/saved_models_shuai/ablation/save_codet5_no_msg/checkpoints-345000-2.43 \
+  # --load_model_path ${mnt_dir}/PreViewer/saved_models_shuai/ablation/save_codet5_no_msg/checkpoints-345000-2.43 \
+  # --output_dir ${mnt_dir}/PreViewer/saved_models_ref_shuai_nomsg \

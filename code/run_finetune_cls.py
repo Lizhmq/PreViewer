@@ -169,15 +169,14 @@ def main(args):
     save_steps = args.save_steps
     train_file = args.train_filename
     valid_file = args.dev_filename
-    train_files = [file for file in os.listdir(train_file) if file.startswith("cls-train-chunk") and file.endswith(".jsonl")]
-    valid_files = [file for file in os.listdir(valid_file) if file.startswith("cls-valid") and file.endswith(".jsonl")]
+    if os.path.isdir(train_file):
+        train_files = [file for file in os.listdir(train_file) if file.startswith("cls-train-chunk") and file.endswith(".jsonl")]
+    else:
+        train_files = [train_file]
     logger.warning("Train files: %s", train_files)
-    assert len(valid_files) == 1
     random.shuffle(train_files)
     train_files = [os.path.join(train_file, file) for file in train_files]
-    valid_files = [os.path.join(valid_file, valid_files[0])]
-    # acc = eval_epoch_acc(args, valid_dataloader, model, tokenizer)
-    # logger.info("Initial acc: %s", acc)
+    valid_files = [valid_file]
     for epoch in range(1, args.train_epochs + 1):
         # set seed for reproducible data split
         save_seed = args.seed

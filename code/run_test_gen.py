@@ -85,6 +85,8 @@ def eval_epoch_bleu(args, eval_dataloader, model, tokenizer):
         for c in chars:
             pred_nls[i] = pred_nls[i].replace(c, " " + c + " ")
             pred_nls[i] = " ".join(pred_nls[i].split())
+            golds[i] = golds[i].replace(c, " " + c + " ")
+            golds[i] = " ".join(golds[i].split())
     bleu = bleu_fromstr(pred_nls, golds, rmstop=False)
     logger.warning(f"WithStop BLEU: {bleu}")
     bleu = bleu_fromstr(pred_nls, golds, rmstop=True)

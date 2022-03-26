@@ -20,28 +20,28 @@ NCCL_DEBUG=INFO
 # echo -e "import nltk\nnltk.download('punkt')" > tmp.py
 # python tmp.py
 
-# python -m torch.distributed.launch --nproc_per_node ${PER_NODE_GPU} --node_rank=${RANK} --nnodes=${NODES} --master_addr=${MASTER_HOST} --master_port=${MASTER_PORT} ../run_test_gen.py  \
-#   --model_type codet5 \
-#   --add_lang_ids \
-#   --train_epochs 30 \
-#   --config_name ${mnt_dir}/PreViewer/saved_models_gen_shuai_newdata/checkpoints-12600-5.34 \
-#   --tokenizer_path ${mnt_dir}/PreViewer/pretrained_models/codet5 \
-#   --model_name_or_path ${mnt_dir}/PreViewer/saved_models_gen_shuai_newdata/checkpoints-12600-5.34 \
-#   --load_model_path ${mnt_dir}/PreViewer/saved_models_gen_shuai_newdata/checkpoints-12600-5.34 \
-#   --output_dir ${mnt_dir}/PreViewer/empty \
-#   --eval_file ${mnt_dir}/Processor/newdata/msg-test.jsonl \
-#   --max_source_length 300 \
-#   --max_target_length 128 \
-#   --eval_batch_size 12 \
-#   --mask_rate 0.15 \
-#   --save_steps 1800 \
-#   --beam_size 10 \
-#   --log_steps 100 \
-#   --train_steps 120000 \
-#   --gpu_per_node=${PER_NODE_GPU} \
-#   --node_index=${RANK} \
-#   --seed 2233 \
-#   --raw_input
+python -m torch.distributed.launch --nproc_per_node ${PER_NODE_GPU} --node_rank=${RANK} --nnodes=${NODES} --master_addr=${MASTER_HOST} --master_port=${MASTER_PORT} ../run_test_gen.py  \
+  --model_type codet5 \
+  --add_lang_ids \
+  --train_epochs 30 \
+  --config_name ${mnt_dir}/PreViewer/saved_models_gen_shuai_link/checkpoints-21600-3.24 \
+  --tokenizer_path ${mnt_dir}/PreViewer/pretrained_models/codet5 \
+  --model_name_or_path ${mnt_dir}/PreViewer/saved_models_gen_shuai_link/checkpoints-21600-3.24 \
+  --load_model_path ${mnt_dir}/PreViewer/saved_models_gen_shuai_link/checkpoints-21600-3.24 \
+  --output_dir ${mnt_dir}/PreViewer/empty \
+  --eval_file ${mnt_dir}/LinkedIn/test.jsonl \
+  --max_source_length 512 \
+  --max_target_length 128 \
+  --eval_batch_size 12 \
+  --mask_rate 0.15 \
+  --save_steps 1800 \
+  --beam_size 10 \
+  --log_steps 100 \
+  --train_steps 120000 \
+  --gpu_per_node=${PER_NODE_GPU} \
+  --node_index=${RANK} \
+  --seed 2233 \
+  --raw_input
 
 
 # python -m torch.distributed.launch --nproc_per_node ${PER_NODE_GPU} --node_rank=${RANK} --nnodes=${NODES} --master_addr=${MASTER_HOST} --master_port=${MASTER_PORT} ../run_test_gen.py  \
@@ -68,28 +68,28 @@ NCCL_DEBUG=INFO
 #   --raw_input
 
 
-python -m torch.distributed.launch --nproc_per_node ${PER_NODE_GPU} --node_rank=${RANK} --nnodes=${NODES} --master_addr=${MASTER_HOST} --master_port=${MASTER_PORT} ../run_test_gen.py  \
-  --model_type t5 \
-  --add_lang_ids \
-  --train_epochs 30 \
-  --config_name ${mnt_dir}/PreViewer/saved_models_gen_tufano_newdata/checkpoints-48600-4.33 \
-  --tokenizer_path ${mnt_dir}/Tufano/pytorch/TokenizerModel.model \
-  --model_name_or_path ${mnt_dir}/PreViewer/saved_models_gen_tufano_newdata/checkpoints-48600-4.33 \
-  --load_model_path ${mnt_dir}/PreViewer/saved_models_gen_tufano_newdata/checkpoints-48600-4.33 \
-  --output_dir ${mnt_dir}/PreViewer/empty \
-  --eval_file ${mnt_dir}/Processor/newdata/msg-test.jsonl \
-  --max_source_length 300 \
-  --max_target_length 128 \
-  --eval_batch_size 12 \
-  --mask_rate 0.15 \
-  --save_steps 1800 \
-  --beam_size 10 \
-  --log_steps 100 \
-  --train_steps 120000 \
-  --gpu_per_node=${PER_NODE_GPU} \
-  --node_index=${RANK} \
-  --seed 2233 \
-  --raw_input
+# python -m torch.distributed.launch --nproc_per_node ${PER_NODE_GPU} --node_rank=${RANK} --nnodes=${NODES} --master_addr=${MASTER_HOST} --master_port=${MASTER_PORT} ../run_test_gen.py  \
+#   --model_type t5 \
+#   --add_lang_ids \
+#   --train_epochs 30 \
+#   --config_name ${mnt_dir}/PreViewer/saved_models_gen_tufano_newdata/checkpoints-48600-4.33 \
+#   --tokenizer_path ${mnt_dir}/Tufano/pytorch/TokenizerModel.model \
+#   --model_name_or_path ${mnt_dir}/PreViewer/saved_models_gen_tufano_newdata/checkpoints-48600-4.33 \
+#   --load_model_path ${mnt_dir}/PreViewer/saved_models_gen_tufano_newdata/checkpoints-48600-4.33 \
+#   --output_dir ${mnt_dir}/PreViewer/empty \
+#   --eval_file ${mnt_dir}/Processor/newdata/msg-test.jsonl \
+#   --max_source_length 300 \
+#   --max_target_length 128 \
+#   --eval_batch_size 12 \
+#   --mask_rate 0.15 \
+#   --save_steps 1800 \
+#   --beam_size 10 \
+#   --log_steps 100 \
+#   --train_steps 120000 \
+#   --gpu_per_node=${PER_NODE_GPU} \
+#   --node_index=${RANK} \
+#   --seed 2233 \
+#   --raw_input
 
 # python -m torch.distributed.launch --nproc_per_node ${PER_NODE_GPU} --node_rank=${RANK} --nnodes=${NODES} --master_addr=${MASTER_HOST} --master_port=${MASTER_PORT} ../run_test_gen.py  \
 #   --model_type codet5 \
@@ -100,7 +100,7 @@ python -m torch.distributed.launch --nproc_per_node ${PER_NODE_GPU} --node_rank=
 #   --model_name_or_path ${mnt_dir}/PreViewer/saved_models_gen_codet5_newdata/checkpoints-25200-4.89 \
 #   --load_model_path ${mnt_dir}/PreViewer/saved_models_gen_codet5_newdata/checkpoints-25200-4.89 \
 #   --output_dir ${mnt_dir}/PreViewer/empty \
-#   --eval_file ${mnt_dir}/Processor/data/msg-test-s.jsonl \
+#   --eval_file ${mnt_dir}/Processor/newdata/msg-test.jsonl \
 #   --max_source_length 300 \
 #   --max_target_length 128 \
 #   --eval_batch_size 12 \

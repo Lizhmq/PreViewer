@@ -174,6 +174,7 @@ def main(args):
     else:
         train_files = [train_file]
     logger.warning("Train files: %s", train_files)
+    random.seed(args.seed)
     random.shuffle(train_files)
     train_files = [os.path.join(train_file, file) for file in train_files]
     valid_files = [valid_file]
@@ -185,7 +186,7 @@ def main(args):
         args.seed = save_seed
         model.train()
         nb_tr_examples, nb_tr_steps, tr_loss = 0, 0, 0
-        for _, _, train_dataloader in get_loaders(train_files, args, tokenizer, pool):        # WARNING: this is a iterator, to save memory
+        for _, _, train_dataloader in get_loaders(train_files, args, tokenizer, pool):        # WARNING: this is an iterator, to save memory
             for step, examples in enumerate(train_dataloader, 1):
                 if step == 1:
                     ex = examples[0]

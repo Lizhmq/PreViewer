@@ -70,11 +70,11 @@ def eval_epoch_bleu(args, eval_dataloader, model, tokenizer):
             golds.append(json.loads(line)["new"])
     golds = golds[:len(pred_nls)]
     if args.raw_input:
-        for i in range(len(golds)):
-            pred_nls[i], golds[i] = SimpleRefineDataset.process_pred_gold(pred_nls[i], golds[i])
+        datasetClass = SimpleRefineDataset
     else:
-        for i in range(len(golds)):
-            pred_nls[i], golds[i] = RefineDataset.process_pred_gold(pred_nls[i], golds[i])
+        datasetClass = RefineDataset
+    for i in range(len(golds)):
+        pred_nls[i], golds[i] = datasetClass.process_pred_gold(pred_nls[i], golds[i])
     with open(os.path.join(args.model_name_or_path, "preds.txt"), "w", encoding="utf-8") as f:
         for pred in pred_nls:
             f.write(pred.strip() + "\n")

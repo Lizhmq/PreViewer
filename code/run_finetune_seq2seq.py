@@ -16,7 +16,7 @@ from models import build_or_load_gen_model
 from configs import add_args, set_seed, set_dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
-from utils import CommentGenDataset, SimpleGenDataset
+from utils import Seq2SeqDataset
 from evaluator.smooth_bleu import bleu_fromstr
 
 
@@ -28,26 +28,20 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-
-def get_loaders(data_files, args, tokenizer, pool, eval=False):
+def get_loader(data_file, args, tokenizer, pool, eval=False):
     def fn(features):
         return features
     global_rank = args.global_rank
-    for data_file in data_files:
-        if args.raw_input:
-            dataset = SimpleGenDataset(tokenizer, pool, args, data_file)
-        else:
-            dataset = CommentGenDataset(tokenizer, pool, args, data_file)
-        data_len = len(dataset)
-        if global_rank == 0:
-            logger.info(f"Data length: {data_len}.")
-        if eval:
-            sampler = SequentialSampler(dataset)
-        else:
-            sampler = DistributedSampler(dataset)
-        dataloader = DataLoader(dataset, sampler=sampler, batch_size=args.train_batch_size if not eval else args.eval_batch_size, \
-                                num_workers=args.cpu_count, collate_fn=fn)
-        yield dataset, sampler, dataloader
+    dataset = Seq2SeqDataset(tokenizer, pool, args, data_file)
+    data_len = len(dataset)
+    if global_rank == 0:
+        logger.info(f"Data length: {data_len}.")
+    if eval:
+        sampler = SequentialSampler(dataset)
+    else:
+        sampler = DistributedSampler(dataset)
+    dataloader = DataLoader(dataset, sampler=sampler, batch_size=args.train_batch_size, num_workers=args.cpu_count, collate_fn=fn)
+    return dataset, sampler, dataloader
 
 
 def eval_bleu_epoch(args, eval_dataloader, model, tokenizer):
@@ -61,7 +55,6 @@ def eval_bleu_epoch(args, eval_dataloader, model, tokenizer):
         source_ids = torch.tensor(
             [ex.source_ids for ex in examples], dtype=torch.long
         ).to(args.local_rank)
-        ids = [ex.example_id for ex in examples]
         source_mask = source_ids.ne(tokenizer.pad_id)
         preds = model.generate(source_ids,
                             attention_mask=source_mask,
@@ -71,14 +64,15 @@ def eval_bleu_epoch(args, eval_dataloader, model, tokenizer):
                             max_length=args.max_target_length)
         top_preds = list(preds.cpu().numpy())
         pred_ids.extend(top_preds)
-    # [1:] to remove beginning '<msg>'
-    pred_nls = [tokenizer.decode(id[1:], skip_special_tokens=True, clean_up_tokenization_spaces=False) for id in pred_ids]
+    pred_nls = [tokenizer.decode(id, skip_special_tokens=True, clean_up_tokenization_spaces=False) for id in pred_ids]
     valid_file = args.dev_filename
     golds = []
     with open(valid_file, "r") as f:
         for line in f:
-            golds.append(json.loads(line)["msg"])
+            golds.append(json.loads(line)["new"])
     golds = golds[:len(pred_nls)]
+    for i in range(len(golds)):
+        pred_nls[i], golds[i] = Seq2SeqDataset.process_pred_gold(pred_nls[i], golds[i])
     with open(os.path.join(args.model_name_or_path, "preds.txt"), "w", encoding="utf-8") as f:
         for pred in pred_nls:
             f.write(pred.strip() + "\n")
@@ -87,6 +81,12 @@ def eval_bleu_epoch(args, eval_dataloader, model, tokenizer):
             f.write(gold.strip() + "\n")
     # logger.warning(f"Golds: {golds}")
     # logger.warning(f"Preds: {pred_nls}")
+    em = 0
+    for pred, gold in zip(pred_nls, golds):
+        if " ".join(pred.split()) == " ".join(gold.split()):
+            em += 1
+    em = em / len(golds)
+    logger.warning(f"EM: {em}")
     bleu = bleu_fromstr(pred_nls, golds, rmstop=False)
     return bleu
 
@@ -176,14 +176,10 @@ def main(args):
     save_steps = args.save_steps
     train_file = args.train_filename
     valid_file = args.dev_filename
-    if os.path.isdir(train_file):
-        train_files = [file for file in os.listdir(train_file) if file.startswith("train") and file.endswith(".jsonl")]
-    else:
-        train_files = [train_file]
-    random.seed(args.seed)
-    random.shuffle(train_files)
-    train_files = [os.path.join(train_file, file) for file in train_files]
-    valid_files = [valid_file]
+    data_tuple = get_loader(train_file, args, tokenizer, pool)        # WARNING: this is a iterator, to save memory
+    _, _, train_dataloader = data_tuple
+    data_tuple = get_loader(valid_file, args, tokenizer, pool, eval=True)
+    _, _, valid_dataloader = data_tuple
     # bleu = eval_bleu_epoch(args, valid_dataloader, model, tokenizer)
     # logger.warning("Initial bleu: {}".format(bleu))
     for epoch in range(1, args.train_epochs + 1):
@@ -194,83 +190,79 @@ def main(args):
         args.seed = save_seed
         model.train()
         nb_tr_examples, nb_tr_steps, tr_loss = 0, 0, 0
-        for _, _, train_dataloader in get_loaders(train_files, args, tokenizer, pool):        # WARNING: this is an iterator, to save memory
-            for step, examples in enumerate(train_dataloader, 1):
-                if step == 1:
-                    ex = examples[0]
-                    logger.info(f"batch size: {len(examples)}")
-                    logger.info(f"example source: {tokenizer.convert_ids_to_tokens(ex.source_ids)}")
-                    # logger.info(f"example label: {tokenizer.convert_ids_to_tokens(ex.source_labels)}")
-                    logger.info(f"example target: {tokenizer.convert_ids_to_tokens(ex.target_ids)}")
-                source_ids = torch.tensor(
-                    [ex.source_ids for ex in examples], dtype=torch.long
-                ).to(local_rank)
-                source_labels = None
-                target_ids = torch.tensor(
-                    [ex.target_ids for ex in examples], dtype=torch.long
-                ).to(local_rank)
-                source_mask = source_ids.ne(tokenizer.pad_id)
-                target_mask = target_ids.ne(tokenizer.pad_id)
+        for step, examples in enumerate(train_dataloader, 1):
+            if step == 1:
+                ex = examples[0]
+                logger.info(f"batch size: {len(examples)}")
+                logger.info(f"example source: {tokenizer.convert_ids_to_tokens(ex.source_ids)}")
+                # logger.info(f"example label: {tokenizer.convert_ids_to_tokens(ex.source_labels)}")
+                logger.info(f"example target: {tokenizer.convert_ids_to_tokens(ex.target_ids)}")
+            source_ids = torch.tensor(
+                [ex.source_ids for ex in examples], dtype=torch.long
+            ).to(local_rank)
+            target_ids = torch.tensor(
+                [ex.target_ids for ex in examples], dtype=torch.long
+            ).to(local_rank)
+            source_mask = source_ids.ne(tokenizer.pad_id)
+            target_mask = target_ids.ne(tokenizer.pad_id)
 
-                loss = model(
-                    input_ids=source_ids,
-                    input_labels=source_labels,
-                    decoder_input_ids=target_ids,
-                    attention_mask=source_mask,
-                    decoder_attention_mask=target_mask,
-                    encoder_loss=False
-                )
+            loss = model(
+                input_ids=source_ids,
+                input_labels=None,
+                decoder_input_ids=target_ids,
+                attention_mask=source_mask,
+                decoder_attention_mask=target_mask,
+                encoder_loss=False
+            )
 
-                if args.gpu_per_node > 1:
-                    loss = loss.mean()  # mean() to average on multi-gpu.
-                if args.gradient_accumulation_steps > 1:
-                    loss = loss / args.gradient_accumulation_steps
-                tr_loss += loss.item()
+            if args.gpu_per_node > 1:
+                loss = loss.mean()  # mean() to average on multi-gpu.
+            if args.gradient_accumulation_steps > 1:
+                loss = loss / args.gradient_accumulation_steps
+            tr_loss += loss.item()
 
-                nb_tr_examples += source_ids.size(0)
-                nb_tr_steps += 1
-                loss.backward()
+            nb_tr_examples += source_ids.size(0)
+            nb_tr_steps += 1
+            loss.backward()
 
-                if nb_tr_steps % args.gradient_accumulation_steps == 0:
-                    # Update parameters
-                    optimizer.step()
-                    optimizer.zero_grad()
-                    scheduler.step()
-                    global_step += 1
-                    if args.global_rank == 0 and global_step % args.log_steps == 0:
-                        train_loss = round(
-                            tr_loss * args.gradient_accumulation_steps / nb_tr_steps,
-                            4,
-                        )
-                        logger.info(
-                            "step {}/{}: Train loss {}".format(
-                                global_step,
-                                args.train_steps,
-                                round(train_loss, 3),
-                            )
-                        )
-                if global_step == args.train_steps and args.global_rank == 0:
-                    # end training
-                    _, _, valid_dataloader = next(get_loaders(valid_files, args, tokenizer, pool, eval=True))
-                    bleu = eval_bleu_epoch(args, valid_dataloader, model, tokenizer)
-                    output_dir = os.path.join(args.output_dir, "checkpoints-last" + "-" + str(bleu))
-                    save_model(model, optimizer, scheduler, output_dir, config)
-                    logger.info(f"Reach max steps {args.train_steps}.")
-                    time.sleep(5)
-                    return
-                if args.global_rank == 0 and \
-                        global_step % save_steps == 0 and \
-                        nb_tr_steps % args.gradient_accumulation_steps == 0:
-                    _, _, valid_dataloader = next(get_loaders(valid_files, args, tokenizer, pool, eval=True))
-                    bleu = eval_bleu_epoch(args, valid_dataloader, model, tokenizer)
-                    output_dir = os.path.join(args.output_dir, "checkpoints-" + str(global_step) + "-" + str(bleu))
-                    save_model(model, optimizer, scheduler, output_dir, config)
+            if nb_tr_steps % args.gradient_accumulation_steps == 0:
+                # Update parameters
+                optimizer.step()
+                optimizer.zero_grad()
+                scheduler.step()
+                global_step += 1
+                if args.global_rank == 0 and global_step % args.log_steps == 0:
+                    train_loss = round(
+                        tr_loss * args.gradient_accumulation_steps / nb_tr_steps,
+                        4,
+                    )
                     logger.info(
-                        "Save the {}-step model and optimizer into {}".format(
-                            global_step, output_dir
+                        "step {}/{}: Train loss {}".format(
+                            global_step,
+                            args.train_steps,
+                            round(train_loss, 3),
                         )
                     )
-                    time.sleep(5)
+            if global_step == args.train_steps and args.global_rank == 0:
+                # end training
+                bleu = eval_bleu_epoch(args, valid_dataloader, model, tokenizer)
+                output_dir = os.path.join(args.output_dir, "checkpoints-last" + "-" + str(bleu))
+                save_model(model, optimizer, scheduler, output_dir, config)
+                logger.info(f"Reach max steps {args.train_steps}.")
+                time.sleep(5)
+                return
+            if args.global_rank == 0 and \
+                    global_step % save_steps == 0 and \
+                    nb_tr_steps % args.gradient_accumulation_steps == 0:
+                bleu = eval_bleu_epoch(args, valid_dataloader, model, tokenizer)
+                output_dir = os.path.join(args.output_dir, "checkpoints-" + str(global_step) + "-" + str(bleu))
+                save_model(model, optimizer, scheduler, output_dir, config)
+                logger.info(
+                    "Save the {}-step model and optimizer into {}".format(
+                        global_step, output_dir
+                    )
+                )
+                time.sleep(5)
 
 
 if __name__ == "__main__":

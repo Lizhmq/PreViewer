@@ -33,7 +33,7 @@ python -m torch.distributed.launch --nproc_per_node ${PER_NODE_GPU} --node_rank=
   --max_source_length 200 \
   --max_target_length 200 \
   --train_batch_size 6 \
-  --learning_rate 3e-3 \
+  --learning_rate 3e-4 \
   --gradient_accumulation_steps 3 \
   --mask_rate 0.15 \
   --save_steps 1800 \

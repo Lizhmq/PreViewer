@@ -1,6 +1,5 @@
 import re, json
 import os, random
-from pyparsing import line_end
 import torch, logging
 from copy import deepcopy as cp
 from torch.utils.data import Dataset
@@ -103,7 +102,7 @@ class RefineDataset(Dataset):
         gold = gold.split("\n")
         gold = [line[1:].strip() for line in gold]
         gold = " ".join(gold)
-        pred = " ".join(pred.split()[1:])   # remove start <s>
+        pred = " ".join(pred.split())
         pred = pred.replace("<add> ", "")
         return pred, gold
 
@@ -158,9 +157,26 @@ class SimpleRefineDataset(RefineDataset):
         gold = gold.split("\n")
         gold = [line[1:].strip() for line in gold]
         gold = " ".join(gold)
-        pred = " ".join(pred.split()[1:])   # remove start <s>
+        pred = " ".join(pred.split())
         return pred, gold
 
+
+class Seq2SeqDataset(RefineDataset):
+    def tokenize(self, item):
+        example, tokenizer, args = item
+        inputs, outputs = example["old"], example["new"]
+        inputs = " ".join(inputs.split())
+        outputs = " ".join(outputs.split())
+        srcids = self.encode_remove(tokenizer, inputs, args)
+        tgtids = self.encode_remove(tokenizer, outputs, args)
+        srcids, tgtids = self.pad_assert(srcids, tgtids, args, tokenizer)
+        return RefineFeatures(example["id"], srcids, tgtids)
+    
+    @staticmethod
+    def process_pred_gold(pred, gold):
+        gold = " ".join(gold.split())
+        pred = " ".join(pred.split())
+        return pred, gold
 
 
 class TextDataset(Dataset):

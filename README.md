@@ -2,7 +2,7 @@
 
 We pre-train a CodeReviewer model to automate three code reivew related tasks: **Diff quality estimation**, **Review generation**, **Code refinement**.
 
-![](ex.png)
+<img src="ex.png" width="90%" class="center">
 
 CodeReviewer is initialized with [CodeT5](https://github.com/salesforce/CodeT5) and further trained on four designed pre-training tasks:
 

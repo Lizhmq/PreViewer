@@ -172,6 +172,8 @@ def add_args(parser):
     )
     parser.add_argument("--eval_steps", default=-1, type=int, help="")
     parser.add_argument("--eval_file", default="", type=str)
+    parser.add_argument("--out_file", default="", type=str)
+    parser.add_argument("--break_cnt", default=-1, type=int)
     parser.add_argument("--train_steps", default=-1, type=int, help="")
     parser.add_argument(
         "--warmup_steps", default=100, type=int, help="Linear warmup over warmup_steps."

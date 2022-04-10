@@ -27,6 +27,7 @@ python -m torch.distributed.launch --nproc_per_node ${PER_NODE_GPU} --node_rank=
   --config_name ${mnt_dir}/PreViewer/saved_models_codet5_shuai/save_codet5/checkpoints-245000-3.97 \
   --tokenizer_path ${mnt_dir}/PreViewer/pretrained_models/codet5 \
   --model_name_or_path ${mnt_dir}/PreViewer/saved_models_codet5_shuai/save_codet5/checkpoints-245000-3.97 \
+  --load_model_path ${mnt_dir}/PreViewer/saved_models_codet5_shuai/save_codet5/checkpoints-245000-3.97 \
   --output_dir ${mnt_dir}/PreViewer/saved_models_ref_shuai_scr \
   --train_filename ${mnt_dir}/Processor/data/ref-train.jsonl \
   --dev_filename ${mnt_dir}/Processor/data/ref-valid.jsonl \

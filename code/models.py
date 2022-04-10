@@ -299,8 +299,6 @@ def build_or_load_gen_model(args):
         get_model_size(model),
         args.model_name_or_path,
     )
-    if args.load_model_path is None:
-        args.load_model_path = args.model_name_or_path
     if args.load_model_path is not None:
         model_path = os.path.join(args.load_model_path, "pytorch_model.bin")
         logger.info("Reload model from {}".format(model_path))

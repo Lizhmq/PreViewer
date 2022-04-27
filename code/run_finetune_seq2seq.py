@@ -39,7 +39,7 @@ def get_loader(data_file, args, tokenizer, pool, eval=False):
     if eval:
         sampler = SequentialSampler(dataset)
     else:
-        sampler = DistributedSampler(dataset)
+        sampler = DistributedSampler(dataset) if args.world_size > 1 else RandomSampler(dataset)
     dataloader = DataLoader(dataset, sampler=sampler, batch_size=args.train_batch_size, num_workers=args.cpu_count, collate_fn=fn)
     return dataset, sampler, dataloader
 
@@ -69,7 +69,7 @@ def eval_bleu_epoch(args, eval_dataloader, model, tokenizer):
     golds = []
     with open(valid_file, "r") as f:
         for line in f:
-            golds.append(json.loads(line)["new"])
+            golds.append(json.loads(line)["target"])
     golds = golds[:len(pred_nls)]
     for i in range(len(golds)):
         pred_nls[i], golds[i] = Seq2SeqDataset.process_pred_gold(pred_nls[i], golds[i])
@@ -88,7 +88,7 @@ def eval_bleu_epoch(args, eval_dataloader, model, tokenizer):
     em = em / len(golds)
     logger.warning(f"EM: {em}")
     bleu = bleu_fromstr(pred_nls, golds, rmstop=False)
-    return bleu
+    return em, bleu
 
 
 def save_model(model, optimizer, scheduler, output_dir, config):
@@ -113,20 +113,27 @@ def save_model(model, optimizer, scheduler, output_dir, config):
 
 
 def main(args):
-    dist.init_process_group(backend="nccl")
-    local_rank = dist.get_rank() % args.gpu_per_node
+    try:
+        dist.init_process_group(backend="nccl")
+        local_rank = dist.get_rank() % args.gpu_per_node
+        args.world_size = dist.get_world_size()
+    except:
+        local_rank = 0
+        args.world_size = 1
     args.global_rank = local_rank + args.node_index * args.gpu_per_node
     args.local_rank = local_rank
-    args.world_size = dist.get_world_size()
     logger.warning("Process rank: %s, global rank: %s, world size: %s, bs: %s",
                    args.local_rank, args.global_rank, \
-                   torch.distributed.get_world_size(), \
+                   args.world_size, \
                    args.train_batch_size)
     torch.cuda.set_device(local_rank)
 
     set_seed(args)
     config, model, tokenizer = build_or_load_gen_model(args)
-    model = DDP(model.cuda(), device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
+    if args.world_size > 1:
+        model = DDP(model.cuda(), device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
+    else:
+        model = model.cuda()
     pool = multiprocessing.Pool(args.cpu_count)
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ["bias", "LayerNorm.weight"]
@@ -245,8 +252,8 @@ def main(args):
                     )
             if global_step == args.train_steps and args.global_rank == 0:
                 # end training
-                bleu = eval_bleu_epoch(args, valid_dataloader, model, tokenizer)
-                output_dir = os.path.join(args.output_dir, "checkpoints-last" + "-" + str(bleu))
+                em, bleu = eval_bleu_epoch(args, valid_dataloader, model, tokenizer)
+                output_dir = os.path.join(args.output_dir, "checkpoints-last" + "-" + str(bleu) + "-" + str(em))
                 save_model(model, optimizer, scheduler, output_dir, config)
                 logger.info(f"Reach max steps {args.train_steps}.")
                 time.sleep(5)
@@ -254,8 +261,8 @@ def main(args):
             if args.global_rank == 0 and \
                     global_step % save_steps == 0 and \
                     nb_tr_steps % args.gradient_accumulation_steps == 0:
-                bleu = eval_bleu_epoch(args, valid_dataloader, model, tokenizer)
-                output_dir = os.path.join(args.output_dir, "checkpoints-" + str(global_step) + "-" + str(bleu))
+                em, bleu = eval_bleu_epoch(args, valid_dataloader, model, tokenizer)
+                output_dir = os.path.join(args.output_dir, "checkpoints-" + str(global_step) + "-" + str(bleu) + "-" + str(em))
                 save_model(model, optimizer, scheduler, output_dir, config)
                 logger.info(
                     "Save the {}-step model and optimizer into {}".format(

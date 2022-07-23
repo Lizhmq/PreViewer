@@ -1,5 +1,7 @@
 # PreViewer: Pre-trained CodeReviewer
 
+[WARNING] This repo will not be maintained. Please refer to [CodeReviewer](https://github.com/microsoft/CodeBERT/tree/master/CodeReviewer) for better documentation.
+
 We pre-train a CodeReviewer model to automate three code reivew related tasks: **Diff quality estimation**, **Review generation**, **Code refinement**.
 
 Refer to our paper: [CodeReviewer: Pre-Training for Automating Code Review Activities
